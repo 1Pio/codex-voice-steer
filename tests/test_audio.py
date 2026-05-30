@@ -7,7 +7,7 @@ import wave
 import pytest
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import MicCapture, audio_readiness, list_input_devices, record_input_wav
+from codex_voice_steer.audio import MicCapture, audio_readiness, input_levels, list_input_devices, record_input_wav
 from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 
@@ -177,3 +177,28 @@ def test_record_input_wav_writes_fixed_duration_capture(tmp_path, monkeypatch) -
         assert wav.getnchannels() == 1
         assert wav.getsampwidth() == 2
         assert wav.getnframes() == 1920
+
+
+def test_input_levels_reports_windowed_rms_and_peak(tmp_path, monkeypatch) -> None:
+    class FakeMicCapture:
+        def __init__(self, config):
+            self.config = config
+
+        def frames(self):
+            yield AudioFrame(pcm16=b"\1\0" * 1280, sample_rate=16000, channels=1)
+            yield AudioFrame(pcm16=b"\2\0" * 1280, sample_rate=16000, channels=1)
+            yield AudioFrame(pcm16=b"\3\0" * 1280, sample_rate=16000, channels=1)
+
+    monkeypatch.setattr(audio, "MicCapture", FakeMicCapture)
+    cfg = load_config(overrides={"audio": {"device": "0"}}, path=tmp_path / "missing.toml")
+
+    levels = list(input_levels(cfg, seconds=0.24, interval_ms=160))
+
+    assert len(levels) == 2
+    assert levels[0].elapsed_sec == pytest.approx(0.16)
+    assert levels[0].rms == pytest.approx(2.5**0.5)
+    assert levels[0].peak == 2
+    assert levels[0].device == "0"
+    assert levels[1].elapsed_sec == pytest.approx(0.24)
+    assert levels[1].rms == pytest.approx(3)
+    assert levels[1].peak == 3

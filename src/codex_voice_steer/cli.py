@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
-from .audio import list_input_devices, record_input_wav
+from .audio import input_levels, list_input_devices, record_input_wav
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
@@ -90,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     audio_record.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
     audio_record.add_argument("--device", help="Temporary input device override by index or name.")
     audio_record.add_argument("--json", action="store_true", help="Print capture details as JSON.")
+    audio_meter = audio_sub.add_parser("meter", help="Print live input RMS/peak levels for the configured device.")
+    audio_meter.add_argument("--seconds", type=float, default=5.0, help="Duration to monitor.")
+    audio_meter.add_argument("--interval-ms", type=int, default=500, help="Level reporting interval.")
+    audio_meter.add_argument("--device", help="Temporary input device override by index or name.")
+    audio_meter.add_argument("--jsonl", action="store_true", help="Print each level sample as JSON Lines.")
 
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
     wake_sub = wake.add_subparsers(dest="wake_command", required=True)
@@ -289,6 +294,16 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
         else:
             print(f"recorded {result.seconds:.2f}s from {result.device}: {result.wav_path}")
             print("Verify with: cxv wake test-audio " + str(result.wav_path))
+        return 0
+    if args.audio_command == "meter":
+        cfg = config or load_config()
+        if args.device:
+            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        for level in input_levels(cfg, seconds=float(args.seconds), interval_ms=int(args.interval_ms)):
+            if args.jsonl:
+                print(json.dumps(level.to_dict(), sort_keys=True))
+            else:
+                print(f"{level.elapsed_sec:5.2f}s  rms={level.rms:8.2f}  peak={level.peak:5d}  device={level.device}")
         return 0
     raise ValueError(f"unknown audio command: {args.audio_command}")
 

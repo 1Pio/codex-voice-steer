@@ -58,6 +58,24 @@ class AudioRecordResult:
         }
 
 
+@dataclass(frozen=True)
+class AudioLevel:
+    elapsed_sec: float
+    rms: float
+    peak: int
+    samples: int
+    device: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "elapsed_sec": self.elapsed_sec,
+            "rms": self.rms,
+            "peak": self.peak,
+            "samples": self.samples,
+            "device": self.device,
+        }
+
+
 def audio_readiness(config: Config | None = None, probe_stream: bool = False) -> AudioReadiness:
     if importlib.util.find_spec("sounddevice") is None:
         return AudioReadiness(False, "sounddevice is not installed, so microphone capture is unavailable")
@@ -210,6 +228,48 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
         rms=rms,
         peak=peak,
     )
+
+
+def input_levels(config: Config, seconds: float, interval_ms: int = 500) -> Iterator[AudioLevel]:
+    if seconds <= 0:
+        raise ValueError("meter duration must be greater than zero")
+    if interval_ms <= 0:
+        raise ValueError("meter interval must be greater than zero")
+    sample_rate = int(config.get("audio.sample_rate", 16000))
+    channels = int(config.get("audio.channels", 1))
+    target_samples = int(sample_rate * seconds)
+    interval_samples = max(1, int(sample_rate * interval_ms / 1000))
+    captured_samples = 0
+    window_samples = 0
+    window_level_samples = 0
+    sum_squares = 0.0
+    peak = 0
+    device = str(config.get("audio.device", "default"))
+    for frame in MicCapture(config).frames():
+        remaining = target_samples - captured_samples
+        if remaining <= 0:
+            break
+        take_samples = min(frame.samples, remaining)
+        chunk = frame.pcm16[: take_samples * channels * 2]
+        stats = pcm16_level_stats(chunk)
+        window_level_samples += int(stats["samples"])
+        window_samples += take_samples
+        sum_squares += float(stats["sum_squares"])
+        peak = max(peak, int(stats["peak"]))
+        captured_samples += take_samples
+        if window_samples >= interval_samples or captured_samples >= target_samples:
+            rms = math.sqrt(sum_squares / window_level_samples) if window_level_samples else 0.0
+            yield AudioLevel(
+                elapsed_sec=captured_samples / sample_rate,
+                rms=rms,
+                peak=peak,
+                samples=window_samples,
+                device=device,
+            )
+            window_samples = 0
+            window_level_samples = 0
+            sum_squares = 0.0
+            peak = 0
 
 
 def pcm16_level_stats(pcm16: bytes) -> dict[str, float | int]:
