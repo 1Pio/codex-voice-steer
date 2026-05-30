@@ -51,7 +51,7 @@ class CodexAppServer:
     def start(self) -> None:
         if self.proc is not None:
             return
-        listen = str(self.config.get("codex.app_server_listen", "stdio://"))
+        listen = self._app_server_listen()
         self.proc = subprocess.Popen(
             ["codex", "app-server", "--listen", listen],
             stdin=subprocess.PIPE,
@@ -70,6 +70,12 @@ class CodexAppServer:
             },
         )
         self.codex_home = str(init.get("codexHome", ""))
+
+    def _app_server_listen(self) -> str:
+        mode = str(self.config.get("codex.app_server", "managed"))
+        if mode != "managed":
+            raise ValueError(f"unsupported codex.app_server: {mode}")
+        return str(self.config.get("codex.app_server_listen", "stdio://"))
 
     def close(self) -> None:
         if self.proc is None:

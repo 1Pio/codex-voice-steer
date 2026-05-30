@@ -38,6 +38,14 @@ def test_thread_start_injects_developer_instructions(tmp_path) -> None:
     assert params["config"]["default_permissions"] == ":workspace"
 
 
+def test_app_server_rejects_unmanaged_mode(tmp_path) -> None:
+    cfg = load_config(overrides={"codex": {"app_server": "external"}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+
+    with pytest.raises(ValueError, match="codex.app_server"):
+        bridge._app_server_listen()
+
+
 def test_permission_profile_is_used_for_app_server_config(tmp_path) -> None:
     cfg = load_config(overrides={"codex": {"permission_profile": ":read-only"}}, path=tmp_path / "missing.toml")
     bridge = CodexAppServer(cfg)

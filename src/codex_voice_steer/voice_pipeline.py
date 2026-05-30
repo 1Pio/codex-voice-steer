@@ -39,6 +39,7 @@ class EndpointCollector:
         self.frames: list[AudioFrame] = []
         self.sample_rate = int(config.get("audio.sample_rate", 16000))
         self.min_speech_samples = int(self.sample_rate * int(config.get("vad.min_speech_ms", 180)) / 1000)
+        self.min_silence_samples = int(self.sample_rate * int(config.get("vad.min_silence_ms", 450)) / 1000)
         self.final_silence_samples = int(self.sample_rate * int(config.get("vad.final_silence_ms", 900)) / 1000)
         self.force_final_samples = int(self.sample_rate * int(config.get("vad.force_final_silence_ms", 3000)) / 1000)
         self.max_samples = int(self.sample_rate * int(config.get("vad.max_utterance_sec", 45)))
@@ -58,7 +59,8 @@ class EndpointCollector:
         trailing_silence = total_samples - last_end
         if total_samples >= self.max_samples:
             return True
-        return speech_samples >= self.min_speech_samples and trailing_silence >= self.final_silence_samples
+        required_silence = max(self.min_silence_samples, self.final_silence_samples)
+        return speech_samples >= self.min_speech_samples and trailing_silence >= required_silence
 
 
 class VoicePipeline:
@@ -103,7 +105,11 @@ class VoicePipeline:
             self.event_sink("stt_final", {"transcript": ""})
             return VoiceTurnResult(status="empty_transcript", wav_path=wav_path, reason="STT returned no text")
         trailing_words = list(self.config.get("endpointing.trailing_fragment_words", []))
-        if looks_fragmentary(transcript, trailing_words, int(self.config.get("endpointing.min_chars_to_send", 8))):
+        if self.config.get("endpointing.ask_if_fragment", True) and looks_fragmentary(
+            transcript,
+            trailing_words,
+            int(self.config.get("endpointing.min_chars_to_send", 8)),
+        ):
             transcript = "[cxv: transcript may be fragmentary]\n" + transcript
         self.event_sink("stt_final", {"transcript": transcript})
         self.deliver_text(transcript)
