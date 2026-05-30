@@ -47,7 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("up", help="Start the background cxv daemon.")
     sub.add_parser("down", help="Stop the background cxv daemon.")
-    sub.add_parser("status", help="Show daemon and binding status.")
+    status = sub.add_parser("status", help="Show daemon and binding status.")
+    status.add_argument("--json", action="store_true", help="Print the full raw daemon status payload.")
+    status.add_argument("--events", type=int, default=5, help="Number of recent events to show in compact status.")
     sub.add_parser("serve", help="Run the cxv daemon in the foreground.")
     sub.add_parser("listen", help="Start daemon if needed and enable listening.")
     sub.add_parser("pause", help="Pause listening while keeping daemon state warm.")
@@ -115,7 +117,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         print("cxv daemon stopped" if stopped else "cxv daemon already stopped")
         return 0
     if args.command == "status":
-        return _status(config)
+        return _status(args, config)
     if args.command in {"listen", "pause", "text", "ttt", "steer", "interrupt", "stop", "bind", "voice"}:
         return asyncio.run(_daemon_command(args, config))
     if args.command == "config":
@@ -167,13 +169,57 @@ def _payload(args: argparse.Namespace, command: str, **fields: Any) -> dict[str,
     return payload
 
 
-def _status(config: Config) -> int:
+def _status(args: argparse.Namespace, config: Config) -> int:
     if not is_running(config):
         print("cxv daemon: stopped")
         return 0
     response = asyncio.run(send_request(config, {"command": "status"}))
-    print(json.dumps(response, indent=2, sort_keys=True))
+    if args.json:
+        print(json.dumps(response, indent=2, sort_keys=True))
+    else:
+        print(_render_compact_status(response, event_limit=max(args.events, 0)))
     return 0 if response.get("ok") else 1
+
+
+def _render_compact_status(response: dict[str, Any], event_limit: int = 5) -> str:
+    state = dict(response.get("state") or {})
+    queued = state.get("queued_inputs") or []
+    events = state.get("events") or []
+    lines = [
+        "cxv daemon: running",
+        f"listening: {_yes_no(state.get('listening', False))}",
+        f"thread: {state.get('thread_id') or '-'}",
+        f"session: {state.get('session_id') or '-'}",
+        f"active turn: {state.get('active_turn_id') or '-'}",
+        f"queued inputs: {len(queued)}",
+        f"cwd: {state.get('cwd') or '.'}",
+    ]
+    if event_limit and events:
+        lines.append("recent events:")
+        for event in events[-event_limit:]:
+            lines.append(f"- {_event_summary(event)}")
+    return "\n".join(lines)
+
+
+def _yes_no(value: Any) -> str:
+    return "yes" if bool(value) else "no"
+
+
+def _event_summary(event: dict[str, Any]) -> str:
+    name = str(event.get("event", "event"))
+    details: list[str] = []
+    for key in ("action", "status", "turn_id", "transcript", "reason", "error"):
+        value = event.get(key)
+        if value:
+            details.append(f"{key}={_clip(str(value))}")
+    return name if not details else f"{name} " + " ".join(details)
+
+
+def _clip(value: str, limit: int = 80) -> str:
+    clean = " ".join(value.split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1] + "..."
 
 
 def _config_command(args: argparse.Namespace, config: Config) -> int:

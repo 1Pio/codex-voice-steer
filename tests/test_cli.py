@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codex_voice_steer.cli import _payload, build_parser
+from codex_voice_steer.cli import _payload, _render_compact_status, build_parser
 
 
 def test_core_commands_parse() -> None:
@@ -55,3 +55,36 @@ def test_ui_mode_flags_parse_as_overrides() -> None:
     quiet = _payload(build_parser().parse_args(["--quiet", "--show-partials", "listen"]), "listen")
     assert jsonl["overrides"] == {"ui": {"mode": "jsonl"}}
     assert quiet["overrides"] == {"ui": {"mode": "quiet", "show_partial_transcripts": True}}
+
+
+def test_status_flags_parse() -> None:
+    args = build_parser().parse_args(["status", "--json", "--events", "2"])
+    assert args.command == "status"
+    assert args.json is True
+    assert args.events == 2
+
+
+def test_compact_status_does_not_dump_full_event_history() -> None:
+    output = _render_compact_status(
+        {
+            "ok": True,
+            "state": {
+                "listening": True,
+                "thread_id": "thread_1",
+                "session_id": "session_1",
+                "active_turn_id": "turn_1",
+                "queued_inputs": ["next"],
+                "cwd": "/tmp/cxv",
+                "events": [
+                    {"event": "old", "transcript": "ignore me"},
+                    {"event": "stt_final", "transcript": "hello " * 40},
+                ],
+            },
+        },
+        event_limit=1,
+    )
+    assert "cxv daemon: running" in output
+    assert "listening: yes" in output
+    assert "queued inputs: 1" in output
+    assert "old" not in output
+    assert "hello " * 20 not in output
