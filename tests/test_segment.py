@@ -3,6 +3,7 @@ from __future__ import annotations
 import wave
 
 from codex_voice_steer.config import load_config
+from codex_voice_steer.audio import wav_frames
 from codex_voice_steer.runtime import SegmentWriter
 from codex_voice_steer.segment import AudioFrame, PreRollBuffer, looks_fragmentary, write_wav
 
@@ -24,6 +25,14 @@ def test_write_wav(tmp_path) -> None:
         assert wav.getframerate() == 16000
         assert wav.getnchannels() == 1
         assert wav.getnframes() == 320
+
+
+def test_wav_frames_pads_final_chunk(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    path = write_wav(tmp_path / "short.wav", [frame(160)], 16000, 1)
+    frames = list(wav_frames(cfg, path))
+    assert len(frames) == 1
+    assert frames[0].samples == 1280
 
 
 def test_segment_writer_includes_preroll(tmp_path) -> None:

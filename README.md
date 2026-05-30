@@ -11,4 +11,12 @@ V1 scope is intentionally local and user-owned:
 - STT defaults to finalized MacParakeet segments, not fake streaming.
 - No launchd, cron, autostart service, containers, VMs, Codex patches, built-in TTS, Hermes mode, or Hermes routing.
 
-The first runnable implementation includes the CLI, config, daemon lifecycle, typed Codex route, app-server client, doctor, model catalog, and bundled Codex agent templates. Wake/VAD/audio adapters are explicit runtime seams and report missing local dependencies through `cxv doctor`.
+The current implementation includes the CLI, config, daemon lifecycle, foreground listener, typed Codex route, app-server client, doctor, model catalog, bundled Codex agent templates, OpenWakeWord Scarlett model, Silero VAD, and MacParakeet finalized STT.
+
+Controlled audio receipts should use file or explicit loopback input, not speaker playback into the microphone:
+
+```bash
+cxv wake test-audio /path/to/scarlett.wav
+cxv voice test-audio /path/to/full-turn.wav
+cxv voice test-audio /path/to/full-turn.wav --send
+```

@@ -56,4 +56,22 @@ class MacParakeetStt:
         if proc.returncode != 0:
             stderr = proc.stderr.strip() or proc.stdout.strip()
             raise RuntimeError(f"macparakeet-cli failed with exit {proc.returncode}: {stderr}")
-        return SttResult(text=proc.stdout.strip(), command=cmd)
+        return SttResult(text=clean_macparakeet_text(proc.stdout), command=cmd)
+
+
+def clean_macparakeet_text(output: str) -> str:
+    body = output.split("--- Word Timestamps ---", 1)[0]
+    lines = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            lines.append("")
+            continue
+        if stripped.startswith("Transcribing ") or stripped.startswith("File:") or stripped.startswith("Duration:"):
+            continue
+        lines.append(line.rstrip())
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines).strip()

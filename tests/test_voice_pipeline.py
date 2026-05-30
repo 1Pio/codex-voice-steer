@@ -46,9 +46,19 @@ def test_endpoint_finalizes_after_final_silence(tmp_path) -> None:
 def test_voice_pipeline_wake_vad_stt_delivery(tmp_path) -> None:
     config = load_config(path=tmp_path / "missing.toml")
     delivered: list[str] = []
-    pipeline = VoicePipeline(config, FakeWake(), FakeVad(), FakeStt(), delivered.append, temp_dir=tmp_path)
+    events: list[tuple[str, dict[str, object]]] = []
+    pipeline = VoicePipeline(
+        config,
+        FakeWake(),
+        FakeVad(),
+        FakeStt(),
+        delivered.append,
+        event_sink=lambda event, fields: events.append((event, fields)),
+        temp_dir=tmp_path,
+    )
     frames = [frame(), frame(), *[frame(value=b"\0\0") for _ in range(14)]]
     result = pipeline.run_once(frames)
     assert result.status == "delivered"
     assert result.wav_path is not None and result.wav_path.exists()
     assert delivered == ["check status now"]
+    assert [event for event, _fields in events] == ["wake_detected", "vad_final", "stt_final"]

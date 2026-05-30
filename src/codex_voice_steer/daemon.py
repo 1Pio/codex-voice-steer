@@ -12,7 +12,7 @@ from typing import Any
 
 from .codex_app_server import CodexAppServer
 from .config import Config, load_config
-from .audio import MicCapture, audio_readiness
+from .audio import MicCapture, audio_readiness, wav_frames
 from .paths import expand_path
 from .state import StateStore
 from .stt import MacParakeetStt
@@ -95,6 +95,19 @@ class CxvDaemon:
         if command in {"text", "steer"}:
             result = await asyncio.to_thread(self._codex().deliver_text, str(request.get("text", "")), command == "steer")
             return {"ok": True, "result": result.__dict__}
+        if command == "voice-test-audio":
+            wav_path = Path(str(request.get("wav", "")))
+            send = bool(request.get("send", False))
+            result = await asyncio.to_thread(self._run_voice_turn_from_wav, wav_path, send)
+            self.state_store.append_event(
+                "voice_test_audio",
+                status=result.status,
+                transcript=result.transcript,
+                wav_path=str(result.wav_path or ""),
+                reason=result.reason,
+                sent=bool(send and result.delivered),
+            )
+            return {"ok": result.delivered, "result": self._voice_result(result)}
         if command == "interrupt":
             result = await asyncio.to_thread(self._codex().interrupt)
             return {"ok": True, "result": result.__dict__}
@@ -135,14 +148,32 @@ class CxvDaemon:
             self.state_store.update(listening=False)
 
     def _run_voice_turn(self):
+        return self._voice_pipeline(send=True).run_once(MicCapture(self.config).frames())
+
+    def _run_voice_turn_from_wav(self, wav_path: Path, send: bool):
+        return self._voice_pipeline(send=send).run_once(wav_frames(self.config, wav_path))
+
+    def _voice_pipeline(self, send: bool) -> VoicePipeline:
+        deliver_text = (lambda text: self._codex().deliver_text(text)) if send else (lambda _text: None)
         pipeline = VoicePipeline(
             self.config,
             wake=OpenWakeWordDetector(self.config),
             vad=SileroVad(self.config),
             stt=MacParakeetStt(self.config),
-            deliver_text=lambda text: self._codex().deliver_text(text),
+            deliver_text=deliver_text,
+            event_sink=lambda event, fields: self.state_store.append_event(event, **fields),
         )
-        return pipeline.run_once(MicCapture(self.config).frames())
+        return pipeline
+
+    @staticmethod
+    def _voice_result(result) -> dict[str, Any]:
+        return {
+            "status": result.status,
+            "wav_path": str(result.wav_path or ""),
+            "transcript": result.transcript,
+            "delivered": result.delivered,
+            "reason": result.reason,
+        }
 
 
 async def send_request(config: Config, payload: dict[str, Any]) -> dict[str, Any]:

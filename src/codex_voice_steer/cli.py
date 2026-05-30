@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
     test_audio.add_argument("wav", help="Path to the WAV file to score.")
     test_audio.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this test.")
 
+    voice = sub.add_parser("voice", help="Controlled full-pipeline voice test utilities.")
+    voice_sub = voice.add_subparsers(dest="voice_command", required=True)
+    voice_test = voice_sub.add_parser("test-audio", help="Run a 16 kHz mono PCM16 WAV through wake, VAD, STT, and optional Codex delivery.")
+    voice_test.add_argument("wav", help="Path to the WAV file to process.")
+    voice_test.add_argument("--send", action="store_true", help="Send the finalized transcript to Codex after STT.")
+
     agents = sub.add_parser("agents", help="List, install, or print bundled Codex agents.")
     agents_sub = agents.add_subparsers(dest="agents_command", required=True)
     agents_sub.add_parser("list")
@@ -107,7 +113,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         return 0
     if args.command == "status":
         return _status(config)
-    if args.command in {"listen", "pause", "text", "ttt", "steer", "interrupt", "stop", "bind"}:
+    if args.command in {"listen", "pause", "text", "ttt", "steer", "interrupt", "stop", "bind", "voice"}:
         return asyncio.run(_daemon_command(args, config))
     if args.command == "config":
         return _config_command(args, config)
@@ -140,6 +146,10 @@ async def _daemon_command(args: argparse.Namespace, config: Config) -> int:
         response = await send_request(config, {"command": "interrupt"})
     elif args.command == "bind":
         response = await send_request(config, {"command": "bind", "thread_id": args.thread, "cwd": args.cwd})
+    elif args.command == "voice":
+        if args.voice_command != "test-audio":
+            raise ValueError(f"unsupported voice command: {args.voice_command}")
+        response = await send_request(config, {"command": "voice-test-audio", "wav": args.wav, "send": args.send})
     else:
         raise ValueError(f"unsupported daemon command: {args.command}")
     print(json.dumps(response, indent=2, sort_keys=True))

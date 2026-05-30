@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
+from typing import Any
 
 from .config import Config
 from .audio import audio_readiness
+from .daemon import ensure_daemon, send_request
 from .vad import vad_readiness
 from .wake import wake_readiness
 
@@ -15,7 +18,7 @@ def event_line(message: str, timestamps: bool = True) -> str:
     return f"{time.strftime('%H:%M:%S')}  {message}"
 
 
-def run_foreground_tui(config: Config) -> int:
+def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: int | None = None) -> int:
     print("cxv 0.1.0  codex-voice-steer")
     print(f"wake: {config.get('wake.word', 'scarlett')}     stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     codex: app-server")
     blockers = []
@@ -27,15 +30,74 @@ def run_foreground_tui(config: Config) -> int:
             print(event_line(f"blocked: {blocker}", bool(config.get("ui.show_timestamps", True))))
         print("Run `cxv doctor` for details.")
         return 2
-    print(event_line("listening", bool(config.get("ui.show_timestamps", True))))
     print("Press Ctrl-C to stop.")
     try:
-        while True:
-            time.sleep(1)
+        return asyncio.run(_run_foreground_listener(config, poll_interval=poll_interval, max_polls=max_polls))
     except KeyboardInterrupt:
         print()
+        try:
+            asyncio.run(send_request(config, {"command": "pause"}))
+        except Exception as exc:
+            print(event_line(f"pause failed: {exc}", bool(config.get("ui.show_timestamps", True))))
         print(event_line("stopped", bool(config.get("ui.show_timestamps", True))))
         return 0
+
+
+async def _run_foreground_listener(config: Config, poll_interval: float, max_polls: int | None) -> int:
+    timestamps = bool(config.get("ui.show_timestamps", True))
+    await ensure_daemon(config)
+    before = await send_request(config, {"command": "status"})
+    seen = len(before.get("state", {}).get("events", []))
+    response = await send_request(config, {"command": "listen"})
+    if not response.get("ok"):
+        for blocker in response.get("blockers", []):
+            print(event_line(f"blocked: {blocker}", timestamps))
+        return 1
+    print(event_line("listening", timestamps))
+    polls = 0
+    try:
+        while True:
+            status = await send_request(config, {"command": "status"})
+            events = list(status.get("state", {}).get("events", []))
+            for event in events[seen:]:
+                rendered = render_event(event)
+                if rendered:
+                    print(event_line(rendered, timestamps))
+            seen = len(events)
+            polls += 1
+            if max_polls is not None and polls >= max_polls:
+                return 0
+            await asyncio.sleep(poll_interval)
+    finally:
+        if max_polls is not None:
+            await send_request(config, {"command": "pause"})
+
+
+def render_event(event: dict[str, Any]) -> str:
+    name = str(event.get("event", ""))
+    if name == "wake_detected":
+        return "wake detected"
+    if name == "vad_final":
+        return f"vad final: {event.get('wav_path', '')}"
+    if name == "stt_final":
+        return "user: " + str(event.get("transcript", "")).strip()
+    if name == "user_final":
+        return "user: " + str(event.get("text", "")).strip()
+    if name == "sent":
+        return f"sent: {event.get('action', '')}"
+    if name == "turn_started":
+        return f"turn started: {event.get('turn_id', '')}"
+    if name == "turn_completed":
+        return f"turn completed: {event.get('turn_id', '')}"
+    if name == "voice_turn":
+        return f"voice turn: {event.get('status', '')}"
+    if name == "voice_test_audio":
+        return f"voice test: {event.get('status', '')}"
+    if name == "voice_error":
+        return f"voice error: {event.get('error', '')}"
+    if name == "codex_visible_delta":
+        return "codex: " + str(event.get("delta", "")).strip()
+    return ""
 
 
 def emit_jsonl(event: str, **fields: object) -> None:

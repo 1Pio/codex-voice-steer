@@ -34,3 +34,11 @@ def test_wake_test_audio_parses() -> None:
     assert args.wake_command == "test-audio"
     assert args.wav == "/tmp/scarlett.wav"
     assert args.threshold == 0.4
+
+
+def test_voice_test_audio_parses() -> None:
+    args = build_parser().parse_args(["voice", "test-audio", "/tmp/turn.wav", "--send"])
+    assert args.command == "voice"
+    assert args.voice_command == "test-audio"
+    assert args.wav == "/tmp/turn.wav"
+    assert args.send is True
