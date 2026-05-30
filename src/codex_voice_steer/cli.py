@@ -15,6 +15,7 @@ from .daemon import ensure_daemon, is_running, run_serve, send_request, start_ba
 from .doctor import render_doctor, run_doctor
 from .models import render_models
 from .tui import run_foreground_tui
+from .wake import score_wake_audio
 from .wake_training import render_wake_training_checks, wake_training_checks
 
 
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
     wake_sub = wake.add_subparsers(dest="wake_command", required=True)
     wake_sub.add_parser("training-status", help="Check local Scarlett wake-model training prerequisites.")
+    test_audio = wake_sub.add_parser("test-audio", help="Score a 16 kHz mono PCM16 WAV through the wake detector.")
+    test_audio.add_argument("wav", help="Path to the WAV file to score.")
+    test_audio.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this test.")
 
     agents = sub.add_parser("agents", help="List, install, or print bundled Codex agents.")
     agents_sub = agents.add_subparsers(dest="agents_command", required=True)
@@ -114,7 +118,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         print(render_doctor(run_doctor(config)))
         return 0
     if args.command == "wake":
-        return _wake_command(args)
+        return _wake_command(args, config)
     if args.command == "agents":
         return _agents_command(args)
     raise ValueError(f"unknown command: {args.command}")
@@ -186,11 +190,15 @@ def _agents_command(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown agents command: {args.agents_command}")
 
 
-def _wake_command(args: argparse.Namespace) -> int:
+def _wake_command(args: argparse.Namespace, config: Config) -> int:
     if args.wake_command == "training-status":
         checks = wake_training_checks()
         print(render_wake_training_checks(checks))
         return 0 if all(check.ok for check in checks) else 1
+    if args.wake_command == "test-audio":
+        result = score_wake_audio(config, Path(args.wav), threshold=args.threshold)
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return 0 if result.hit else 1
     raise ValueError(f"unknown wake command: {args.wake_command}")
 
 

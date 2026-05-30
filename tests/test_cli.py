@@ -26,3 +26,11 @@ def test_wake_training_status_parses() -> None:
     args = build_parser().parse_args(["wake", "training-status"])
     assert args.command == "wake"
     assert args.wake_command == "training-status"
+
+
+def test_wake_test_audio_parses() -> None:
+    args = build_parser().parse_args(["wake", "test-audio", "/tmp/scarlett.wav", "--threshold", "0.4"])
+    assert args.command == "wake"
+    assert args.wake_command == "test-audio"
+    assert args.wav == "/tmp/scarlett.wav"
+    assert args.threshold == 0.4

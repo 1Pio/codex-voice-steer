@@ -31,13 +31,13 @@ python -m venv /private/tmp/cxv-livekit-wakeword
 Expected exported model:
 
 ```text
-output/scarlett/scarlett.onnx
+/private/tmp/cxv-livekit-wakeword-output/scarlett/scarlett.onnx
 ```
 
 Copy only the final model into the repo if it is small enough and legally safe to commit:
 
 ```bash
-cp output/scarlett/scarlett.onnx models/wake/scarlett.onnx
+cp /private/tmp/cxv-livekit-wakeword-output/scarlett/scarlett.onnx models/wake/scarlett.onnx
 ```
 
 ## Acceptance Checks
@@ -46,6 +46,7 @@ The exported model is not accepted just because the file exists. It must pass:
 
 ```bash
 python tools/verify_wake_model.py models/wake/scarlett.onnx
+cxv wake test-audio /private/tmp/cxv-livekit-wakeword-output/scarlett/positive_test/clip_000000_r0.wav
 cxv doctor
 cxv listen
 ```
@@ -58,6 +59,8 @@ Then run real live checks:
 3. Speak non-wake distractors for several minutes and confirm no obvious false trigger.
 4. Tune `wake.sensitivity` and `vad.speech_threshold` only from observed receipts.
 ```
+
+Do not treat speaker playback into the microphone as a reliable live wake test. Use `cxv wake test-audio` for controlled file-based wake scoring, or route system audio into the configured input device with an explicit loopback device before treating playback as evidence.
 
 ## Sources
 

@@ -3,7 +3,16 @@ model_name: scarlett
 target_phrases:
   - "scarlett"
 
+data_dir: /private/tmp/cxv-livekit-wakeword-data
+output_dir: /private/tmp/cxv-livekit-wakeword-output
+
 n_samples: 10000
+
+augmentation:
+  background_paths:
+    - /private/tmp/cxv-livekit-wakeword-data/backgrounds
+  rir_paths:
+    - /private/tmp/cxv-livekit-wakeword-data/rirs
 
 model:
   model_type: conv_attention

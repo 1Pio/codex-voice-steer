@@ -6,13 +6,20 @@ V1 requires a real custom openWakeWord model at:
 models/wake/scarlett.onnx
 ```
 
-Current blocker receipt:
+Current receipt:
 
-- `openwakeword==0.6.0` installs and imports in the project venv.
-- The package runtime is available after installing the optional wake extra.
-- The repository does not yet contain a reliable trained `scarlett` model.
-- Official openWakeWord guidance says models process 16-bit 16 kHz PCM in 80 ms frames, custom model training uses synthetic wake-word clips plus negative data, and reliable evaluation needs false-reject and false-accept testing in realistic audio.
-- `openwakeword.train` is not self-contained on this machine. Current direct import receipt:
+- `models/wake/scarlett.onnx` is a real LiveKit-trained ONNX classifier exported outside the V1 runtime environment.
+- V1 runtime still uses OpenWakeWord. LiveKit is external training/evaluation tooling only.
+- The model is also packaged under `codex_voice_steer/resources/wake/scarlett.onnx` so an installed PATH `cxv` can load it outside the repo.
+- `cxv wake test-audio` verifies controlled 16 kHz mono PCM16 WAV fixtures through the same OpenWakeWord adapter.
+- Current direct fixture smoke: positive generated Scarlett clip hit true at max score 0.644560 with threshold 0.55; negative generated clip hit false at max score 0.020178.
+- `cxv doctor` passes with the packaged Scarlett model in the installed tool environment.
+
+The first successful LiveKit run is useful but caveated: it skipped standalone background/RIR augmentation because LiveKit defaulted those paths relative to `./data`. `tools/livekit-wakeword/scarlett.yaml` now pins `/private/tmp/cxv-livekit-wakeword-data/backgrounds` and `/private/tmp/cxv-livekit-wakeword-data/rirs`; rerun train/eval with those paths before treating wake reliability as fully accepted.
+
+Historical local openWakeWord training blocker:
+
+- `openwakeword.train` was not self-contained on this machine. Direct import receipt:
 
 ```text
 ModuleNotFoundError: No module named 'torchinfo'
@@ -32,7 +39,4 @@ ModuleNotFoundError: No module named 'torchinfo'
 cxv wake training-status
 ```
 
-- A direct `cxv listen` smoke now refuses to enable listening and reports the missing model instead of pretending wake detection is active.
-- A synthetic or placeholder model must not be shipped as the V1 wake model.
-
-Do not treat this README as the model. `cxv doctor` remains blocked until the ONNX file exists and can be loaded.
+Do not treat speaker playback into the microphone as reliable wake evidence. Use `cxv wake test-audio` for controlled file scoring, or route system audio into the configured input with an explicit loopback device before treating playback as a wake receipt.
