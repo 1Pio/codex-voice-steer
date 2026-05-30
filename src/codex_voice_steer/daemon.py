@@ -289,6 +289,7 @@ def start_background(config: Config) -> int:
 def stop_background(config: Config) -> bool:
     if not is_running(config):
         StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
+        _terminate_stale_serve_processes()
         return False
     pid_path = expand_path(str(config.get("server.pid_path")))
     pid = int(pid_path.read_text().strip())
@@ -297,11 +298,67 @@ def stop_background(config: Config) -> bool:
     while time.time() < deadline:
         if not is_running(config):
             StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
+            _terminate_stale_serve_processes(exclude={pid})
             return True
         time.sleep(0.1)
     os.kill(pid, signal.SIGKILL)
     StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
+    _terminate_stale_serve_processes(exclude={pid})
     return True
+
+
+def _terminate_stale_serve_processes(exclude: set[int] | None = None) -> None:
+    exclude = set(exclude or set())
+    exclude.add(os.getpid())
+    for pid in _stale_serve_pids(exclude=exclude):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        remaining = [pid for pid in _stale_serve_pids(exclude=exclude) if _pid_alive(pid)]
+        if not remaining:
+            return
+        time.sleep(0.1)
+    for pid in _stale_serve_pids(exclude=exclude):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _stale_serve_pids(exclude: set[int] | None = None) -> list[int]:
+    exclude = set(exclude or set())
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-f", r"python.*-m codex_voice_steer\.cli serve"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return []
+    if proc.returncode not in {0, 1}:
+        return []
+    pids: list[int] = []
+    for line in proc.stdout.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError:
+            continue
+        if pid not in exclude:
+            pids.append(pid)
+    return pids
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 async def ensure_daemon(config: Config, no_start: bool = False) -> None:

@@ -99,8 +99,10 @@ class OpenWakeWordDetector:
             return False
         now = time.monotonic()
         if self.last_wake_monotonic and now - self.last_wake_monotonic < self.refractory_sec:
+            self._reset_model()
             return False
         self.last_wake_monotonic = now
+        self._reset_model()
         return True
 
     def score(self, pcm16_frame) -> float:
@@ -110,6 +112,11 @@ class OpenWakeWordDetector:
             pcm16_frame = np.frombuffer(pcm16_frame, dtype=np.int16)
         scores = self.model.predict(pcm16_frame)
         return float(scores.get(self.word, 0.0))
+
+    def _reset_model(self) -> None:
+        reset = getattr(self.model, "reset", None)
+        if callable(reset):
+            reset()
 
 
 def _openwakeword_feature_kwargs() -> dict[str, str]:

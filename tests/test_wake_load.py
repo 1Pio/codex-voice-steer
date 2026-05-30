@@ -95,6 +95,7 @@ def test_wake_detector_honors_refractory_window(tmp_path, monkeypatch) -> None:
     openwakeword.__spec__ = ModuleSpec("openwakeword", loader=None, is_package=True)
     model_module = types.ModuleType("openwakeword.model")
     model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
+    seen = {"resets": 0}
 
     class Model:
         def __init__(self, wakeword_models, **_kwargs):
@@ -102,6 +103,9 @@ def test_wake_detector_honors_refractory_window(tmp_path, monkeypatch) -> None:
 
         def predict(self, frame):
             return {"scarlett": 0.99}
+
+        def reset(self):
+            seen["resets"] += 1
 
     times = iter([10.0, 10.5, 11.3])
 
@@ -114,6 +118,7 @@ def test_wake_detector_honors_refractory_window(tmp_path, monkeypatch) -> None:
     assert detector.predict(b"\0" * 1280 * 2) is True
     assert detector.predict(b"\0" * 1280 * 2) is False
     assert detector.predict(b"\0" * 1280 * 2) is True
+    assert seen["resets"] == 3
 
 
 def test_wake_readiness_falls_back_to_packaged_model(tmp_path, monkeypatch) -> None:

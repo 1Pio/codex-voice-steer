@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from types import SimpleNamespace
 
 from codex_voice_steer import daemon
 from codex_voice_steer.config import load_config
@@ -26,6 +28,35 @@ state_db = "{state_path}"
     state = store.load()
     assert state.active_turn_id == ""
     assert state.listening is False
+
+
+def test_stop_cleans_stale_serve_processes_when_already_stopped(tmp_path, monkeypatch) -> None:
+    called = {}
+    state_path = tmp_path / "state.json"
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        f"""
+[server]
+socket_path = "{tmp_path / 'cxv.sock'}"
+pid_path = "{tmp_path / 'cxv.pid'}"
+state_db = "{state_path}"
+"""
+    )
+    monkeypatch.setattr(daemon, "_terminate_stale_serve_processes", lambda: called.setdefault("cleanup", True))
+
+    assert stop_background(load_config(path=cfg_path)) is False
+    assert called["cleanup"] is True
+
+
+def test_stale_serve_pids_parses_pgrep_output(monkeypatch) -> None:
+    current = os.getpid()
+
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=f"{current}\n123\nnot-a-pid\n456\n")
+
+    monkeypatch.setattr(daemon.subprocess, "run", fake_run)
+
+    assert daemon._stale_serve_pids(exclude={current, 456}) == [123]
 
 
 def test_voice_delivery_config_queues_when_barge_in_is_disabled(tmp_path) -> None:
