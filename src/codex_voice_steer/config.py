@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import copy
+import json
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .paths import config_path, default_pid_path, default_socket_path, log_dir, state_db_path
+
+
+DEFAULT_DEVELOPER_INSTRUCTIONS = """You are being controlled through codex-voice-steer, a local voice-to-Codex bridge.
+Inputs may come from speech-to-text and may contain fragments, homophones, missing punctuation, or wake-word references.
+Ask concise clarification when an utterance seems cut off or dangerously ambiguous.
+"""
+
+DEFAULT_MSD_INSTRUCTIONS = """When msd speech output is enabled, important user-visible communication should be spoken with `msd say`.
+Keep spoken updates short and meaningful. Do not speak every tool call.
+"""
+
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "ui": {
+        "mode": "interactive",
+        "show_timestamps": True,
+        "show_wake_events": True,
+        "show_vad_events": True,
+        "show_partial_transcripts": False,
+        "show_final_transcripts": True,
+        "show_codex_visible_messages": True,
+        "show_codex_tool_traces": False,
+        "show_codex_reasoning": False,
+        "show_status_line": True,
+        "max_transcript_lines": 200,
+    },
+    "server": {
+        "socket_path": str(default_socket_path()),
+        "pid_path": str(default_pid_path()),
+        "state_db": str(state_db_path()),
+        "log_file": str(log_dir() / "cxv.log"),
+        "idle_timeout_minutes": 0,
+    },
+    "audio": {
+        "device": "default",
+        "sample_rate": 16000,
+        "channels": 1,
+        "pre_roll_ms": 750,
+        "post_wake_grace_ms": 250,
+    },
+    "wake": {
+        "enabled": True,
+        "engine": "openwakeword",
+        "word": "scarlett",
+        "sensitivity": 0.55,
+        "refractory_ms": 1200,
+        "allow_barge_in": True,
+        "model_path": "models/wake/scarlett.onnx",
+    },
+    "vad": {
+        "engine": "silero",
+        "speech_threshold": 0.5,
+        "min_speech_ms": 180,
+        "min_silence_ms": 450,
+        "final_silence_ms": 900,
+        "force_final_silence_ms": 3000,
+        "max_utterance_sec": 45,
+    },
+    "endpointing": {
+        "mode": "vad_plus_heuristics",
+        "min_chars_to_send": 8,
+        "ask_if_fragment": True,
+        "fragment_prompt_policy": "send_to_agent",
+        "trailing_fragment_words": ["and", "but", "or", "because", "so", "also", "then"],
+    },
+    "stt": {
+        "engine": "macparakeet",
+        "mode": "clean",
+        "format": "text",
+        "no_history": True,
+        "telemetry": False,
+        "macparakeet": {
+            "command": "macparakeet-cli",
+            "engine": "parakeet",
+            "speaker_detection": "off",
+            "database": "",
+        },
+        "mlx_whisper": {
+            "model": "mlx-community/whisper-large-v3-turbo",
+            "quality_model": "mlx-community/whisper-large-v3-mlx",
+            "language": "auto",
+            "local_agreement": 2,
+            "partial_window_sec": 6,
+            "max_window_sec": 14,
+        },
+    },
+    "codex": {
+        "app_server": "managed",
+        "app_server_listen": "stdio://",
+        "cwd": ".",
+        "thread_id": "",
+        "resume_thread_id": "",
+        "create_thread_if_missing": True,
+        "model": "gpt-5.5",
+        "effort": "medium",
+        "summary": "concise",
+        "personality": "pragmatic",
+        "fast": False,
+        "agent": "",
+        "permissions": ":workspace",
+        "approval_policy": "on-request",
+        "approvals_reviewer": "auto_review",
+    },
+    "instructions": {
+        "mode": "inject",
+        "developer_instructions": DEFAULT_DEVELOPER_INSTRUCTIONS,
+        "msd": {
+            "enabled": False,
+            "require_msd_on_path": False,
+            "spoken_acknowledgements": "brief",
+            "spoken_status_updates": "important",
+            "spoken_final_results": True,
+            "developer_instructions": DEFAULT_MSD_INSTRUCTIONS,
+        },
+    },
+    "delivery": {
+        "when_idle": "start",
+        "when_active": "steer",
+        "when_not_steerable": "queue",
+        "include_voice_metadata": True,
+        "include_wake_word": True,
+        "include_stt_diagnostics": False,
+    },
+    "commands": {
+        "typed_input_command": "text",
+        "typed_input_aliases": ["ttt"],
+    },
+    "agents": {
+        "ship_agent_templates": True,
+        "default_slim": "cxv-voice-slim",
+        "default_msd": "cxv-voice-msd",
+    },
+}
+
+
+@dataclass(frozen=True)
+class Config:
+    data: dict[str, Any]
+    path: Path
+    loaded: bool
+
+    def get(self, dotted: str, default: Any = None) -> Any:
+        current: Any = self.data
+        for part in dotted.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return default
+            current = current[part]
+        return current
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_config(overrides: dict[str, Any] | None = None, path: Path | None = None) -> Config:
+    cfg_path = path or config_path()
+    loaded = False
+    user_cfg: dict[str, Any] = {}
+    if cfg_path.exists():
+        user_cfg = tomllib.loads(cfg_path.read_text())
+        loaded = True
+        if "version" in user_cfg:
+            raise ValueError("cxv config must not contain a top-level version key")
+    data = deep_merge(DEFAULT_CONFIG, user_cfg)
+    if overrides:
+        data = deep_merge(data, overrides)
+    return Config(data=data, path=cfg_path, loaded=loaded)
+
+
+def default_config_toml() -> str:
+    return _toml(DEFAULT_CONFIG)
+
+
+def write_default_config(path: Path | None = None, force: bool = False) -> Path:
+    cfg_path = path or config_path()
+    if cfg_path.exists() and not force:
+        return cfg_path
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(default_config_toml())
+    return cfg_path
+
+
+def set_config_value(dotted: str, value: str, path: Path | None = None) -> Path:
+    cfg_path = path or config_path()
+    cfg = load_config(path=cfg_path).data if cfg_path.exists() else copy.deepcopy(DEFAULT_CONFIG)
+    parsed = parse_value(value)
+    current = cfg
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        next_value = current.setdefault(part, {})
+        if not isinstance(next_value, dict):
+            raise ValueError(f"{'.'.join(parts[:-1])} is not a table")
+        current = next_value
+    current[parts[-1]] = parsed
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(_toml(cfg))
+    return cfg_path
+
+
+def parse_value(value: str) -> Any:
+    try:
+        return tomllib.loads(f"value = {value}\n")["value"]
+    except tomllib.TOMLDecodeError:
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        return value
+
+
+def _toml(data: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for section, value in data.items():
+        if isinstance(value, dict):
+            _write_section(lines, [section], value)
+        else:
+            lines.append(f"{section} = {_format_value(value)}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_section(lines: list[str], path: list[str], table: dict[str, Any]) -> None:
+    scalar_items = [(k, v) for k, v in table.items() if not isinstance(v, dict)]
+    nested_items = [(k, v) for k, v in table.items() if isinstance(v, dict)]
+    lines.append("")
+    lines.append(f"[{'.'.join(path)}]")
+    for key, value in scalar_items:
+        lines.append(f"{key} = {_format_value(value)}")
+    for key, value in nested_items:
+        _write_section(lines, [*path, key], value)
+
+
+def _format_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_value(item) for item in value) + "]"
+    if isinstance(value, str) and "\n" in value:
+        escaped = value.replace('"""', '\\"\\"\\"')
+        return f'"""{escaped}"""'
+    return json.dumps(value)

@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+import tomllib
+
+import pytest
+
+from codex_voice_steer.config import DEFAULT_CONFIG, default_config_toml, load_config, set_config_value
+
+
+def test_default_config_has_no_version_key() -> None:
+    parsed = tomllib.loads(default_config_toml())
+    assert "version" not in parsed
+    assert parsed["wake"]["word"] == "scarlett"
+    assert parsed["stt"]["engine"] == "macparakeet"
+
+
+def test_user_config_overrides_defaults(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[codex]\nmodel = "gpt-5"\n')
+    cfg = load_config(path=path)
+    assert cfg.get("codex.model") == "gpt-5"
+    assert cfg.get("wake.word") == DEFAULT_CONFIG["wake"]["word"]
+
+
+def test_version_key_is_rejected(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('version = "1"\n')
+    with pytest.raises(ValueError):
+        load_config(path=path)
+
+
+def test_config_set_writes_dotted_value(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    set_config_value("instructions.msd.enabled", "true", path=path)
+    cfg = load_config(path=path)
+    assert cfg.get("instructions.msd.enabled") is True

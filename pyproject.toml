@@ -1,0 +1,25 @@
+[project]
+name = "codex-voice-steer"
+version = "0.1.0"
+description = "Local wake-word voice bridge for steering Codex sessions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "rPio" }]
+dependencies = []
+
+[project.optional-dependencies]
+audio = ["numpy", "sounddevice", "soundfile", "torch", "silero-vad"]
+wake = ["openwakeword"]
+test = ["pytest"]
+
+[project.scripts]
+cxv = "codex_voice_steer.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

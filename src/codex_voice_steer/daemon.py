@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+from .codex_app_server import CodexAppServer
+from .config import Config, load_config
+from .paths import expand_path
+from .state import StateStore
+
+
+class CxvDaemon:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.socket_path = expand_path(str(config.get("server.socket_path")))
+        self.pid_path = expand_path(str(config.get("server.pid_path")))
+        self.state_store = StateStore(expand_path(str(config.get("server.state_db"))))
+        self.codex: CodexAppServer | None = None
+
+    async def serve(self) -> None:
+        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        self.pid_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.socket_path.exists():
+            self.socket_path.unlink()
+        self.pid_path.write_text(str(os.getpid()))
+        server = await asyncio.start_unix_server(self._handle_client, path=str(self.socket_path))
+        try:
+            async with server:
+                await server.serve_forever()
+        finally:
+            if self.socket_path.exists():
+                self.socket_path.unlink()
+            if self.pid_path.exists() and self.pid_path.read_text().strip() == str(os.getpid()):
+                self.pid_path.unlink()
+            if self.codex is not None:
+                self.codex.close()
+
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        line = await reader.readline()
+        try:
+            request = json.loads(line.decode())
+            response = await self._dispatch(request)
+        except Exception as exc:
+            response = {"ok": False, "error": str(exc)}
+        writer.write((json.dumps(response) + "\n").encode())
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+        command = request.get("command")
+        if command == "status":
+            state = self.state_store.load()
+            return {"ok": True, "running": True, "state": state.to_dict()}
+        if command == "listen":
+            state = self.state_store.update(listening=True)
+            return {"ok": True, "state": state.to_dict()}
+        if command == "pause":
+            state = self.state_store.update(listening=False)
+            return {"ok": True, "state": state.to_dict()}
+        if command == "bind":
+            state = self.state_store.update(thread_id=request.get("thread_id", ""), cwd=request.get("cwd", "."))
+            return {"ok": True, "state": state.to_dict()}
+        if command in {"text", "steer"}:
+            result = await asyncio.to_thread(self._codex().deliver_text, str(request.get("text", "")), command == "steer")
+            return {"ok": True, "result": result.__dict__}
+        if command == "interrupt":
+            result = await asyncio.to_thread(self._codex().interrupt)
+            return {"ok": True, "result": result.__dict__}
+        if command == "shutdown":
+            asyncio.get_running_loop().call_soon(asyncio.get_running_loop().stop)
+            return {"ok": True}
+        raise ValueError(f"unknown daemon command: {command}")
+
+    def _codex(self) -> CodexAppServer:
+        if self.codex is None:
+            self.codex = CodexAppServer(self.config, self.state_store)
+            self.codex.start()
+        return self.codex
+
+
+async def send_request(config: Config, payload: dict[str, Any]) -> dict[str, Any]:
+    socket_path = expand_path(str(config.get("server.socket_path")))
+    reader, writer = await asyncio.open_unix_connection(str(socket_path))
+    writer.write((json.dumps(payload) + "\n").encode())
+    await writer.drain()
+    line = await reader.readline()
+    writer.close()
+    await writer.wait_closed()
+    return json.loads(line.decode())
+
+
+def is_running(config: Config) -> bool:
+    pid_path = expand_path(str(config.get("server.pid_path")))
+    socket_path = expand_path(str(config.get("server.socket_path")))
+    if not pid_path.exists() or not socket_path.exists():
+        return False
+    try:
+        os.kill(int(pid_path.read_text().strip()), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def start_background(config: Config) -> int:
+    if is_running(config):
+        pid_path = expand_path(str(config.get("server.pid_path")))
+        return int(pid_path.read_text().strip())
+    cmd = [sys.executable, "-m", "codex_voice_steer.cli", "serve"]
+    log_file = expand_path(str(config.get("server.log_file")))
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log = log_file.open("a")
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        if is_running(config):
+            return proc.pid
+        time.sleep(0.1)
+    raise RuntimeError("cxv daemon did not become ready")
+
+
+def stop_background(config: Config) -> bool:
+    if not is_running(config):
+        return False
+    pid_path = expand_path(str(config.get("server.pid_path")))
+    pid = int(pid_path.read_text().strip())
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if not is_running(config):
+            return True
+        time.sleep(0.1)
+    os.kill(pid, signal.SIGKILL)
+    return True
+
+
+async def ensure_daemon(config: Config, no_start: bool = False) -> None:
+    if is_running(config):
+        return
+    if no_start:
+        raise RuntimeError("cxv daemon is not running")
+    start_background(config)
+
+
+def run_serve() -> None:
+    asyncio.run(CxvDaemon(load_config()).serve())

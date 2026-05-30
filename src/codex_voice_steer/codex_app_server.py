@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+
+from .config import Config
+from .state import CxvState, StateStore
+
+
+EventHandler = Callable[[str, dict[str, Any]], None]
+
+
+@dataclass
+class DeliveryResult:
+    action: str
+    thread_id: str
+    turn_id: str = ""
+    queued: bool = False
+
+
+class JsonRpcError(RuntimeError):
+    def __init__(self, message: str, error: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.error = error or {}
+
+
+class CodexAppServer:
+    def __init__(self, config: Config, state_store: StateStore | None = None, on_event: EventHandler | None = None) -> None:
+        self.config = config
+        self.state_store = state_store or StateStore()
+        self.on_event = on_event or (lambda _method, _params: None)
+        self.proc: subprocess.Popen[str] | None = None
+        self._next_id = 1
+        self._pending: dict[int, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._reader: threading.Thread | None = None
+        self.codex_home = ""
+
+    def __enter__(self) -> "CodexAppServer":
+        self.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def start(self) -> None:
+        if self.proc is not None:
+            return
+        listen = str(self.config.get("codex.app_server_listen", "stdio://"))
+        self.proc = subprocess.Popen(
+            ["codex", "app-server", "--listen", listen],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+        init = self.request(
+            "initialize",
+            {
+                "clientInfo": {"name": "codex-voice-steer", "title": "cxv", "version": "0.1.0"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
+        self.codex_home = str(init.get("codexHome", ""))
+
+    def close(self) -> None:
+        if self.proc is None:
+            return
+        if self.proc.stdin:
+            self.proc.stdin.close()
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+
+    def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if self.proc is None or self.proc.stdin is None:
+            raise RuntimeError("app-server is not running")
+        with self._lock:
+            request_id = self._next_id
+            self._next_id += 1
+        payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        self.proc.stdin.write(json.dumps(payload) + "\n")
+        self.proc.stdin.flush()
+        while True:
+            with self._lock:
+                if request_id in self._pending:
+                    response = self._pending.pop(request_id)
+                    break
+        if "error" in response:
+            raise JsonRpcError(f"{method} failed: {response['error']}", response["error"])
+        return dict(response.get("result") or {})
+
+    def _read_loop(self) -> None:
+        assert self.proc is not None and self.proc.stdout is not None
+        for line in self.proc.stdout:
+            if not line.strip():
+                continue
+            message = json.loads(line)
+            if "id" in message:
+                with self._lock:
+                    self._pending[int(message["id"])] = message
+                continue
+            method = str(message.get("method", ""))
+            params = dict(message.get("params") or {})
+            self._handle_notification(method, params)
+            self.on_event(method, params)
+
+    def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
+        if method == "turn/started":
+            self.state_store.update(active_turn_id=str(params.get("turnId", "")))
+        elif method == "turn/completed":
+            state = self.state_store.update(active_turn_id="")
+            if state.queued_inputs:
+                queued = state.queued_inputs.pop(0)
+                self.state_store.save(state)
+                self.deliver_text(queued)
+
+    def ensure_thread(self) -> str:
+        state = self.state_store.load()
+        configured = str(self.config.get("codex.thread_id", "") or self.config.get("codex.resume_thread_id", ""))
+        thread_id = configured or state.thread_id
+        if thread_id:
+            try:
+                result = self.request("thread/resume", self._thread_resume_params(thread_id))
+                thread = result.get("thread", {})
+                thread_id = str(thread.get("id", thread_id))
+                self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")))
+                return thread_id
+            except JsonRpcError:
+                if not self.config.get("codex.create_thread_if_missing", True):
+                    raise
+        result = self.request("thread/start", self._thread_start_params())
+        thread = result.get("thread", {})
+        thread_id = str(thread.get("id", ""))
+        self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")), cwd=str(thread.get("cwd", self.config.get("codex.cwd", "."))))
+        return thread_id
+
+    def deliver_text(self, text: str, force_steer: bool = False) -> DeliveryResult:
+        state = self.state_store.load()
+        thread_id = self.ensure_thread()
+        active_turn_id = self.state_store.load().active_turn_id
+        if active_turn_id and (force_steer or self.config.get("delivery.when_active", "steer") == "steer"):
+            try:
+                result = self.request(
+                    "turn/steer",
+                    {"threadId": thread_id, "expectedTurnId": active_turn_id, "input": [self._text_input(text)]},
+                )
+                turn = result.get("turn", {})
+                return DeliveryResult(action="turn/steer", thread_id=thread_id, turn_id=str(turn.get("id", active_turn_id)))
+            except JsonRpcError:
+                if self.config.get("delivery.when_not_steerable", "queue") == "queue":
+                    queued = state.queued_inputs or []
+                    queued.append(text)
+                    self.state_store.update(queued_inputs=queued)
+                    return DeliveryResult(action="queue", thread_id=thread_id, queued=True)
+                raise
+        result = self.request("turn/start", self._turn_start_params(thread_id, text))
+        turn = result.get("turn", {})
+        turn_id = str(turn.get("id", ""))
+        self.state_store.update(active_turn_id=turn_id)
+        return DeliveryResult(action="turn/start", thread_id=thread_id, turn_id=turn_id)
+
+    def interrupt(self) -> DeliveryResult:
+        state = self.state_store.load()
+        if not state.thread_id or not state.active_turn_id:
+            return DeliveryResult(action="noop", thread_id=state.thread_id)
+        self.request("turn/interrupt", {"threadId": state.thread_id, "turnId": state.active_turn_id})
+        self.state_store.update(active_turn_id="")
+        return DeliveryResult(action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id)
+
+    def _thread_start_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
+            "developerInstructions": self._developer_instructions(),
+            "model": self.config.get("codex.model", None),
+            "personality": self.config.get("codex.personality", "pragmatic"),
+            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
+            "config": {"default_permissions": self.config.get("codex.permissions", ":workspace")},
+            "serviceName": "codex-voice-steer",
+            "sessionStartSource": "startup",
+            "threadSource": "user",
+        }
+        if self.config.get("codex.fast", False):
+            params["serviceTier"] = "fast"
+        return params
+
+    def _thread_resume_params(self, thread_id: str) -> dict[str, Any]:
+        return {
+            "threadId": thread_id,
+            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
+            "developerInstructions": self._developer_instructions(),
+            "model": self.config.get("codex.model", None),
+            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
+            "config": {"default_permissions": self.config.get("codex.permissions", ":workspace")},
+        }
+
+    def _turn_start_params(self, thread_id: str, text: str) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "threadId": thread_id,
+            "input": [self._text_input(text)],
+            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
+            "model": self.config.get("codex.model", None),
+            "effort": self.config.get("codex.effort", "medium"),
+            "summary": self.config.get("codex.summary", "concise"),
+            "personality": self.config.get("codex.personality", "pragmatic"),
+            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
+        }
+        if self.config.get("codex.fast", False):
+            params["serviceTier"] = "fast"
+        return params
+
+    def _text_input(self, text: str) -> dict[str, str]:
+        if self.config.get("delivery.include_voice_metadata", True):
+            wake = self.config.get("wake.word", "scarlett")
+            text = f"[cxv voice/text input; wake={wake}]\n{text}"
+        return {"type": "text", "text": text}
+
+    def _developer_instructions(self) -> str:
+        if self.config.get("instructions.mode", "inject") != "inject":
+            return ""
+        parts = [str(self.config.get("instructions.developer_instructions", ""))]
+        if self.config.get("instructions.msd.enabled", False):
+            parts.append(str(self.config.get("instructions.msd.developer_instructions", "")))
+        return "\n\n".join(part for part in parts if part.strip())
