@@ -64,6 +64,14 @@ def test_unknown_instruction_mode_disables_injected_instructions(tmp_path) -> No
     assert params["developerInstructions"] == ""
 
 
+def test_selected_bundled_agent_instructions_are_injected(tmp_path) -> None:
+    cfg = load_config(overrides={"codex": {"agent": "cxv-voice-msd"}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    params = bridge._thread_start_params()
+    assert "msd say" in params["developerInstructions"]
+    assert "controlled through codex-voice-steer" in params["developerInstructions"]
+
+
 def test_text_input_contains_voice_metadata(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     bridge = CodexAppServer(cfg)

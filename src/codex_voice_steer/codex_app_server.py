@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .agents import agent_developer_instructions
 from .config import Config
 from .state import CxvState, StateStore
 
@@ -272,7 +273,8 @@ class CodexAppServer:
         mode = str(config.get("instructions.mode", "inject"))
         if mode not in {"inject", "native_agent"}:
             return ""
-        parts = [str(config.get("instructions.developer_instructions", ""))]
+        parts = [agent_developer_instructions(str(config.get("codex.agent", "")))]
+        parts.append(str(config.get("instructions.developer_instructions", "")))
         if config.get("instructions.msd.enabled", False):
             parts.append(str(config.get("instructions.msd.developer_instructions", "")))
         return "\n\n".join(part for part in parts if part.strip())

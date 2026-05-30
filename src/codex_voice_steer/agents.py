@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 
@@ -71,6 +72,11 @@ AGENTS = {
     "msd": ("cxv-voice-msd.toml", MSD_AGENT),
 }
 
+AGENT_NAMES = {
+    "cxv-voice-slim": "slim",
+    "cxv-voice-msd": "msd",
+}
+
 
 def list_agents() -> str:
     return """Available bundled agents:
@@ -94,6 +100,19 @@ def print_agent(kind: str) -> str:
         raise ValueError(f"unknown agent template: {kind}") from exc
 
 
+def agent_developer_instructions(agent_name: str, codex_home: Path | None = None) -> str:
+    agent_name = agent_name.strip()
+    if not agent_name:
+        return ""
+    installed = _installed_agent_path(agent_name, codex_home)
+    if installed.exists():
+        return _agent_file_developer_instructions(installed)
+    bundled_kind = AGENT_NAMES.get(agent_name)
+    if bundled_kind:
+        return _toml_developer_instructions(AGENTS[bundled_kind][1])
+    return ""
+
+
 def install_agent(kind: str, codex_home: Path | None = None, force: bool = False) -> Path:
     try:
         filename, content = AGENTS[kind]
@@ -106,3 +125,18 @@ def install_agent(kind: str, codex_home: Path | None = None, force: bool = False
         return target
     target.write_text(content)
     return target
+
+
+def _installed_agent_path(agent_name: str, codex_home: Path | None = None) -> Path:
+    target_root = codex_home or (Path.home() / ".codex")
+    filename = agent_name if agent_name.endswith(".toml") else f"{agent_name}.toml"
+    return target_root / "agents" / filename
+
+
+def _agent_file_developer_instructions(path: Path) -> str:
+    return _toml_developer_instructions(path.read_text())
+
+
+def _toml_developer_instructions(content: str) -> str:
+    parsed = tomllib.loads(content)
+    return str(parsed.get("developer_instructions", "")).strip()

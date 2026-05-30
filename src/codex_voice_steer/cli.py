@@ -261,6 +261,7 @@ def _agents_command(args: argparse.Namespace) -> int:
         target = install_agent(args.kind, force=args.force)
         print(f"Installed: {target}")
         print("Select it with: cxv config set codex.agent " + ("cxv-voice-msd" if args.kind == "msd" else "cxv-voice-slim"))
+        print("Until native app-server agent selection is proven, cxv injects the selected agent instructions.")
         return 0
     raise ValueError(f"unknown agents command: {args.agents_command}")
 
