@@ -38,8 +38,9 @@ def test_foreground_preflight_uses_configured_audio_device(tmp_path, monkeypatch
     seen = {}
     cfg = load_config(overrides={"audio": {"device": "Loopback Input"}}, path=tmp_path / "missing.toml")
 
-    def fake_audio_readiness(config):
+    def fake_audio_readiness(config, probe_stream=False):
         seen["device"] = config.get("audio.device")
+        seen["probe_stream"] = probe_stream
         return types.SimpleNamespace(ok=False, reason="blocked for test")
 
     monkeypatch.setattr(tui, "audio_readiness", fake_audio_readiness)
@@ -47,4 +48,4 @@ def test_foreground_preflight_uses_configured_audio_device(tmp_path, monkeypatch
     monkeypatch.setattr(tui, "wake_readiness", lambda _config: types.SimpleNamespace(ok=True, reason="ok"))
 
     assert tui.run_foreground_tui(cfg) == 2
-    assert seen == {"device": "Loopback Input"}
+    assert seen == {"device": "Loopback Input", "probe_stream": True}

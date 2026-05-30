@@ -47,6 +47,61 @@ def test_audio_readiness_checks_configured_device_index(tmp_path, monkeypatch) -
     assert seen == {"device": 3, "kind": "input"}
 
 
+def test_audio_readiness_can_probe_configured_stream(tmp_path, monkeypatch) -> None:
+    seen = {}
+    fake_sd = types.ModuleType("sounddevice")
+
+    class RawInputStream:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def __enter__(self):
+            seen["opened"] = True
+            return self
+
+        def __exit__(self, *_exc):
+            seen["closed"] = True
+
+    fake_sd.RawInputStream = RawInputStream
+    fake_sd.query_devices = lambda device=None, kind=None: {"name": "Loopback Input"}
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+    monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _name: object())
+
+    cfg = load_config(overrides={"audio": {"device": "2"}}, path=tmp_path / "missing.toml")
+    result = audio_readiness(cfg, probe_stream=True)
+    assert result.ok is True
+    assert seen["device"] == 2
+    assert seen["samplerate"] == 16000
+    assert seen["channels"] == 1
+    assert seen["opened"] is True
+    assert seen["closed"] is True
+
+
+def test_audio_readiness_reports_stream_open_failure(tmp_path, monkeypatch) -> None:
+    fake_sd = types.ModuleType("sounddevice")
+
+    class RawInputStream:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            raise RuntimeError("permission denied")
+
+        def __exit__(self, *_exc):
+            pass
+
+    fake_sd.RawInputStream = RawInputStream
+    fake_sd.query_devices = lambda device=None, kind=None: {"name": "MacBook Pro Microphone"}
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+    monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _name: object())
+
+    cfg = load_config(path=tmp_path / "missing.toml")
+    result = audio_readiness(cfg, probe_stream=True)
+    assert result.ok is False
+    assert "cannot be opened" in result.reason
+    assert "permission denied" in result.reason
+
+
 def test_mic_capture_uses_configured_numeric_device(tmp_path) -> None:
     cfg = load_config(overrides={"audio": {"device": "3"}}, path=tmp_path / "missing.toml")
     capture = MicCapture(cfg)

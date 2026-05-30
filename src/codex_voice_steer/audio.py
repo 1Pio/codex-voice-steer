@@ -32,7 +32,7 @@ class AudioDevice:
         }
 
 
-def audio_readiness(config: Config | None = None) -> AudioReadiness:
+def audio_readiness(config: Config | None = None, probe_stream: bool = False) -> AudioReadiness:
     if importlib.util.find_spec("sounddevice") is None:
         return AudioReadiness(False, "sounddevice is not installed, so microphone capture is unavailable")
     configured = str(config.get("audio.device", "default")) if config is not None else "default"
@@ -45,6 +45,11 @@ def audio_readiness(config: Config | None = None) -> AudioReadiness:
         label = "default" if device_arg is None else configured
         return AudioReadiness(False, f"microphone input {label!r} is unavailable: {exc}")
     label = "default" if device_arg is None else configured
+    if probe_stream:
+        try:
+            _probe_input_stream(config, device_arg)
+        except Exception as exc:
+            return AudioReadiness(False, f"microphone input {label!r} cannot be opened: {exc}")
     return AudioReadiness(True, f"microphone input {label!r} available: {device.get('name', 'unknown')}")
 
 
@@ -100,6 +105,22 @@ def _default_input_device_name(sd) -> str:
         return str(device.get("name", ""))
     except Exception:
         return ""
+
+
+def _probe_input_stream(config: Config | None, device) -> None:
+    import sounddevice as sd
+
+    sample_rate = int(config.get("audio.sample_rate", 16000)) if config is not None else 16000
+    channels = int(config.get("audio.channels", 1)) if config is not None else 1
+    blocksize = int(sample_rate * 80 / 1000)
+    with sd.RawInputStream(
+        samplerate=sample_rate,
+        blocksize=blocksize,
+        device=device,
+        channels=channels,
+        dtype="int16",
+    ):
+        return
 
 
 class MicCapture:
