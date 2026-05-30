@@ -69,3 +69,24 @@ def test_list_input_devices_filters_outputs_and_marks_default(monkeypatch) -> No
     assert [device.name for device in devices] == ["Loopback Input", "MacBook Pro Microphone"]
     assert [device.index for device in devices] == [1, 2]
     assert devices[1].is_default is True
+
+
+def test_list_input_devices_marks_implicit_default_by_name(monkeypatch) -> None:
+    fake_sd = types.ModuleType("sounddevice")
+    fake_sd.default = types.SimpleNamespace(device=(-1, -1))
+
+    def query_devices(device=None, kind=None):
+        if kind == "input":
+            return {"name": "MacBook Pro Microphone"}
+        return [
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+            {"name": "ZoomAudioDevice", "max_input_channels": 2},
+        ]
+
+    fake_sd.query_devices = query_devices
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+    monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _name: object())
+
+    devices = list_input_devices()
+    assert devices[0].is_default is True
+    assert devices[1].is_default is False

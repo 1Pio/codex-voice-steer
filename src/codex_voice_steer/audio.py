@@ -54,17 +54,19 @@ def list_input_devices() -> list[AudioDevice]:
     import sounddevice as sd
 
     default_input = _default_input_device_index(sd)
+    default_input_name = _default_input_device_name(sd) if default_input is None else ""
     devices = []
     for index, device in enumerate(sd.query_devices()):
         max_input_channels = int(device.get("max_input_channels", 0))
         if max_input_channels <= 0:
             continue
+        name = str(device.get("name", "unknown"))
         devices.append(
             AudioDevice(
                 index=index,
-                name=str(device.get("name", "unknown")),
+                name=name,
                 max_input_channels=max_input_channels,
-                is_default=index == default_input,
+                is_default=index == default_input or bool(default_input_name and name == default_input_name),
             )
         )
     return devices
@@ -86,9 +88,18 @@ def _default_input_device_index(sd) -> int | None:
             value = default[0]
         else:
             value = default
-        return None if value is None else int(value)
+        index = None if value is None else int(value)
+        return index if index is not None and index >= 0 else None
     except Exception:
         return None
+
+
+def _default_input_device_name(sd) -> str:
+    try:
+        device = sd.query_devices(kind="input")
+        return str(device.get("name", ""))
+    except Exception:
+        return ""
 
 
 class MicCapture:
