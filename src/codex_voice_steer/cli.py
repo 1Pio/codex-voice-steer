@@ -40,6 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent", help="Override configured Codex custom agent name when native support exists.")
     parser.add_argument("--model", help="Override Codex model.")
     parser.add_argument("--no-start", action="store_true", help="Do not autostart the daemon for commands that need it.")
+    parser.add_argument("--jsonl", action="store_true", help="Emit foreground cxv events as JSON Lines.")
+    parser.add_argument("--quiet", action="store_true", help="Suppress foreground cxv status/event output.")
+    parser.add_argument("--show-partials", action="store_true", help="Show partial transcript events when available.")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("up", help="Start the background cxv daemon.")
@@ -223,14 +226,23 @@ def _wake_command(args: argparse.Namespace, config: Config) -> int:
 def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     codex: dict[str, Any] = {}
+    ui: dict[str, Any] = {}
     if getattr(args, "cwd", None):
         codex["cwd"] = args.cwd
     if getattr(args, "agent", None):
         codex["agent"] = args.agent
     if getattr(args, "model", None):
         codex["model"] = args.model
+    if getattr(args, "jsonl", False):
+        ui["mode"] = "jsonl"
+    if getattr(args, "quiet", False):
+        ui["mode"] = "quiet"
+    if getattr(args, "show_partials", False):
+        ui["show_partial_transcripts"] = True
     if codex:
         overrides["codex"] = codex
+    if ui:
+        overrides["ui"] = ui
     return overrides
 
 

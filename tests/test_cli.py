@@ -48,3 +48,10 @@ def test_daemon_payload_includes_cli_overrides() -> None:
     args = build_parser().parse_args(["--cwd", "/tmp/cxv-cwd", "--model", "gpt-test", "text", "hello"])
     payload = _payload(args, "text", text="hello")
     assert payload["overrides"] == {"codex": {"cwd": "/tmp/cxv-cwd", "model": "gpt-test"}}
+
+
+def test_ui_mode_flags_parse_as_overrides() -> None:
+    jsonl = _payload(build_parser().parse_args(["--jsonl", "listen"]), "listen")
+    quiet = _payload(build_parser().parse_args(["--quiet", "--show-partials", "listen"]), "listen")
+    assert jsonl["overrides"] == {"ui": {"mode": "jsonl"}}
+    assert quiet["overrides"] == {"ui": {"mode": "quiet", "show_partial_transcripts": True}}

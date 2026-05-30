@@ -19,50 +19,61 @@ def event_line(message: str, timestamps: bool = True) -> str:
 
 
 def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: int | None = None) -> int:
-    print("cxv 0.1.0  codex-voice-steer")
-    print(f"wake: {config.get('wake.word', 'scarlett')}     stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     codex: app-server")
+    mode = str(config.get("ui.mode", "interactive"))
+    if mode == "jsonl":
+        emit_jsonl(
+            "ready",
+            wake=config.get("wake.word", "scarlett"),
+            stt=f"{config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}",
+            codex="app-server",
+        )
+    elif mode != "quiet":
+        print("cxv 0.1.0  codex-voice-steer")
+        print(f"wake: {config.get('wake.word', 'scarlett')}     stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     codex: app-server")
     blockers = []
     for readiness in (audio_readiness(), vad_readiness(), wake_readiness(config)):
         if not readiness.ok:
             blockers.append(readiness.reason)
     if blockers:
         for blocker in blockers:
-            print(event_line(f"blocked: {blocker}", bool(config.get("ui.show_timestamps", True))))
-        print("Run `cxv doctor` for details.")
+            write_ui(config, "blocked", f"blocked: {blocker}", blocker=blocker)
+        if mode != "jsonl" and mode != "quiet":
+            print("Run `cxv doctor` for details.")
         return 2
-    print("Press Ctrl-C to stop.")
+    if mode != "jsonl" and mode != "quiet":
+        print("Press Ctrl-C to stop.")
     try:
         return asyncio.run(_run_foreground_listener(config, poll_interval=poll_interval, max_polls=max_polls))
     except KeyboardInterrupt:
-        print()
+        if mode != "jsonl" and mode != "quiet":
+            print()
         try:
             asyncio.run(send_request(config, {"command": "pause"}))
         except Exception as exc:
-            print(event_line(f"pause failed: {exc}", bool(config.get("ui.show_timestamps", True))))
-        print(event_line("stopped", bool(config.get("ui.show_timestamps", True))))
+            write_ui(config, "pause_failed", f"pause failed: {exc}", error=str(exc))
+        write_ui(config, "stopped", "stopped")
         return 0
 
 
 async def _run_foreground_listener(config: Config, poll_interval: float, max_polls: int | None) -> int:
-    timestamps = bool(config.get("ui.show_timestamps", True))
     await ensure_daemon(config)
     before = await send_request(config, {"command": "status"})
     seen = len(before.get("state", {}).get("events", []))
     response = await send_request(config, {"command": "listen"})
     if not response.get("ok"):
         for blocker in response.get("blockers", []):
-            print(event_line(f"blocked: {blocker}", timestamps))
+            write_ui(config, "blocked", f"blocked: {blocker}", blocker=blocker)
         return 1
-    print(event_line("listening", timestamps))
+    write_ui(config, "listening", "listening")
     polls = 0
     try:
         while True:
             status = await send_request(config, {"command": "status"})
             events = list(status.get("state", {}).get("events", []))
             for event in events[seen:]:
-                rendered = render_event(event)
+                rendered = render_event(event, config)
                 if rendered:
-                    print(event_line(rendered, timestamps))
+                    write_ui(config, str(event.get("event", "event")), rendered, source_event=event)
             seen = len(events)
             polls += 1
             if max_polls is not None and polls >= max_polls:
@@ -73,15 +84,23 @@ async def _run_foreground_listener(config: Config, poll_interval: float, max_pol
             await send_request(config, {"command": "pause"})
 
 
-def render_event(event: dict[str, Any]) -> str:
+def render_event(event: dict[str, Any], config: Config | None = None) -> str:
     name = str(event.get("event", ""))
     if name == "wake_detected":
+        if config is not None and not config.get("ui.show_wake_events", True):
+            return ""
         return "wake detected"
     if name == "vad_final":
+        if config is not None and not config.get("ui.show_vad_events", True):
+            return ""
         return f"vad final: {event.get('wav_path', '')}"
     if name == "stt_final":
+        if config is not None and not config.get("ui.show_final_transcripts", True):
+            return ""
         return "user: " + str(event.get("transcript", "")).strip()
     if name == "user_final":
+        if config is not None and not config.get("ui.show_final_transcripts", True):
+            return ""
         return "user: " + str(event.get("text", "")).strip()
     if name == "sent":
         return f"sent: {event.get('action', '')}"
@@ -96,8 +115,20 @@ def render_event(event: dict[str, Any]) -> str:
     if name == "voice_error":
         return f"voice error: {event.get('error', '')}"
     if name == "codex_visible_delta":
+        if config is not None and not config.get("ui.show_codex_visible_messages", True):
+            return ""
         return "codex: " + str(event.get("delta", "")).strip()
     return ""
+
+
+def write_ui(config: Config, event: str, message: str, **fields: object) -> None:
+    mode = str(config.get("ui.mode", "interactive"))
+    if mode == "quiet":
+        return
+    if mode == "jsonl":
+        emit_jsonl(event, message=message, **fields)
+        return
+    print(event_line(message, bool(config.get("ui.show_timestamps", True))))
 
 
 def emit_jsonl(event: str, **fields: object) -> None:
