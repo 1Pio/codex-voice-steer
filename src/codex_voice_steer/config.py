@@ -107,7 +107,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "personality": "pragmatic",
         "fast": False,
         "agent": "",
-        "permissions": ":workspace",
+        "permission_profile": ":workspace",
         "approval_policy": "on-request",
         "approvals_reviewer": "auto_review",
     },
@@ -182,6 +182,7 @@ def load_config(overrides: dict[str, Any] | None = None, path: Path | None = Non
         loaded = True
         if "version" in user_cfg:
             raise ValueError("cxv config must not contain a top-level version key")
+        user_cfg = _normalize_user_config(user_cfg)
     data = deep_merge(DEFAULT_CONFIG, user_cfg)
     if overrides:
         data = deep_merge(data, overrides)
@@ -204,6 +205,7 @@ def write_default_config(path: Path | None = None, force: bool = False) -> Path:
 def set_config_value(dotted: str, value: str, path: Path | None = None) -> Path:
     cfg_path = path or config_path()
     cfg = load_config(path=cfg_path).data if cfg_path.exists() else copy.deepcopy(DEFAULT_CONFIG)
+    dotted = _canonical_key(dotted)
     parsed = parse_value(value)
     current = cfg
     parts = dotted.split(".")
@@ -216,6 +218,20 @@ def set_config_value(dotted: str, value: str, path: Path | None = None) -> Path:
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(_toml(cfg))
     return cfg_path
+
+
+def _normalize_user_config(config: dict[str, Any]) -> dict[str, Any]:
+    config = copy.deepcopy(config)
+    codex = config.get("codex")
+    if isinstance(codex, dict) and "permissions" in codex and "permission_profile" not in codex:
+        codex["permission_profile"] = codex["permissions"]
+    return config
+
+
+def _canonical_key(dotted: str) -> str:
+    if dotted == "codex.permissions":
+        return "codex.permission_profile"
+    return dotted
 
 
 def parse_value(value: str) -> Any:

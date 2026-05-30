@@ -36,6 +36,20 @@ def test_thread_start_injects_developer_instructions(tmp_path) -> None:
     assert params["config"]["default_permissions"] == ":workspace"
 
 
+def test_permission_profile_is_used_for_app_server_config(tmp_path) -> None:
+    cfg = load_config(overrides={"codex": {"permission_profile": ":read-only"}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    assert bridge._thread_start_params()["config"]["default_permissions"] == ":read-only"
+    assert bridge._thread_resume_params("thread_1")["config"]["default_permissions"] == ":read-only"
+
+
+def test_legacy_permissions_alias_still_works(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[codex]\npermissions = ":danger-full-access"\n')
+    bridge = CodexAppServer(load_config(path=path))
+    assert bridge._thread_start_params()["config"]["default_permissions"] == ":danger-full-access"
+
+
 def test_native_agent_mode_falls_back_to_injected_instructions(tmp_path) -> None:
     cfg = load_config(overrides={"instructions": {"mode": "native_agent"}}, path=tmp_path / "missing.toml")
     bridge = CodexAppServer(cfg)

@@ -12,6 +12,8 @@ def test_default_config_has_no_version_key() -> None:
     assert "version" not in parsed
     assert parsed["wake"]["word"] == "scarlett"
     assert parsed["stt"]["engine"] == "macparakeet"
+    assert parsed["codex"]["permission_profile"] == ":workspace"
+    assert "permissions" not in parsed["codex"]
 
 
 def test_user_config_overrides_defaults(tmp_path) -> None:
@@ -34,3 +36,11 @@ def test_config_set_writes_dotted_value(tmp_path) -> None:
     set_config_value("instructions.msd.enabled", "true", path=path)
     cfg = load_config(path=path)
     assert cfg.get("instructions.msd.enabled") is True
+
+
+def test_config_set_maps_legacy_permissions_key(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    set_config_value("codex.permissions", '":read-only"', path=path)
+    parsed = tomllib.loads(path.read_text())
+    assert parsed["codex"]["permission_profile"] == ":read-only"
+    assert "permissions" not in parsed["codex"]

@@ -222,7 +222,7 @@ class CodexAppServer:
             "personality": config.get("codex.personality", "pragmatic"),
             "approvalPolicy": config.get("codex.approval_policy", "on-request"),
             "approvalsReviewer": config.get("codex.approvals_reviewer", "auto_review"),
-            "config": {"default_permissions": config.get("codex.permissions", ":workspace")},
+            "config": {"default_permissions": self._permission_profile(config)},
             "serviceName": "codex-voice-steer",
             "sessionStartSource": "startup",
             "threadSource": "user",
@@ -240,7 +240,7 @@ class CodexAppServer:
             "model": config.get("codex.model", None),
             "approvalPolicy": config.get("codex.approval_policy", "on-request"),
             "approvalsReviewer": config.get("codex.approvals_reviewer", "auto_review"),
-            "config": {"default_permissions": config.get("codex.permissions", ":workspace")},
+            "config": {"default_permissions": self._permission_profile(config)},
         }
 
     def _turn_start_params(self, thread_id: str, text: str, config: Config | None = None) -> dict[str, Any]:
@@ -276,3 +276,7 @@ class CodexAppServer:
         if config.get("instructions.msd.enabled", False):
             parts.append(str(config.get("instructions.msd.developer_instructions", "")))
         return "\n\n".join(part for part in parts if part.strip())
+
+    @staticmethod
+    def _permission_profile(config: Config) -> str:
+        return str(config.get("codex.permission_profile", config.get("codex.permissions", ":workspace")))
