@@ -29,6 +29,7 @@ class CxvDaemon:
         self.state_store = StateStore(expand_path(str(config.get("server.state_db"))))
         self.codex: CodexAppServer | None = None
         self.listen_task: asyncio.Task[None] | None = None
+        self.listen_overrides: dict[str, Any] = {}
 
     async def serve(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,12 +80,14 @@ class CxvDaemon:
             if blockers:
                 self.state_store.update(listening=False)
                 return {"ok": False, "error": "voice runtime is not ready", "blockers": blockers}
+            self.listen_overrides = self._request_overrides(request)
             state = self.state_store.update(listening=True)
             if self.listen_task is None or self.listen_task.done():
                 self.listen_task = asyncio.create_task(self._listen_loop())
             return {"ok": True, "state": state.to_dict()}
         if command == "pause":
             state = self.state_store.update(listening=False)
+            self.listen_overrides = {}
             if self.listen_task is not None:
                 self.listen_task.cancel()
                 self.listen_task = None
@@ -93,12 +96,13 @@ class CxvDaemon:
             state = self.state_store.update(thread_id=request.get("thread_id", ""), cwd=request.get("cwd", "."))
             return {"ok": True, "state": state.to_dict()}
         if command in {"text", "steer"}:
-            result = await asyncio.to_thread(self._codex().deliver_text, str(request.get("text", "")), command == "steer")
+            config = self._effective_config(request)
+            result = await asyncio.to_thread(self._codex().deliver_text, str(request.get("text", "")), command == "steer", config)
             return {"ok": True, "result": result.__dict__}
         if command == "voice-test-audio":
             wav_path = Path(str(request.get("wav", "")))
             send = bool(request.get("send", False))
-            result = await asyncio.to_thread(self._run_voice_turn_from_wav, wav_path, send)
+            result = await asyncio.to_thread(self._run_voice_turn_from_wav, wav_path, send, self._request_overrides(request))
             self.state_store.append_event(
                 "voice_test_audio",
                 status=result.status,
@@ -148,22 +152,33 @@ class CxvDaemon:
             self.state_store.update(listening=False)
 
     def _run_voice_turn(self):
-        return self._voice_pipeline(send=True).run_once(MicCapture(self.config).frames())
+        config = self.config.with_overrides(self.listen_overrides)
+        return self._voice_pipeline(send=True, config=config).run_once(MicCapture(config).frames())
 
-    def _run_voice_turn_from_wav(self, wav_path: Path, send: bool):
-        return self._voice_pipeline(send=send).run_once(wav_frames(self.config, wav_path))
+    def _run_voice_turn_from_wav(self, wav_path: Path, send: bool, overrides: dict[str, Any] | None = None):
+        config = self.config.with_overrides(overrides)
+        return self._voice_pipeline(send=send, config=config).run_once(wav_frames(config, wav_path))
 
-    def _voice_pipeline(self, send: bool) -> VoicePipeline:
-        deliver_text = (lambda text: self._codex().deliver_text(text)) if send else (lambda _text: None)
+    def _voice_pipeline(self, send: bool, config: Config | None = None) -> VoicePipeline:
+        config = config or self.config
+        deliver_text = (lambda text: self._codex().deliver_text(text, config=config)) if send else (lambda _text: None)
         pipeline = VoicePipeline(
-            self.config,
-            wake=OpenWakeWordDetector(self.config),
-            vad=SileroVad(self.config),
-            stt=MacParakeetStt(self.config),
+            config,
+            wake=OpenWakeWordDetector(config),
+            vad=SileroVad(config),
+            stt=MacParakeetStt(config),
             deliver_text=deliver_text,
             event_sink=lambda event, fields: self.state_store.append_event(event, **fields),
         )
         return pipeline
+
+    def _effective_config(self, request: dict[str, Any]) -> Config:
+        return self.config.with_overrides(self._request_overrides(request))
+
+    @staticmethod
+    def _request_overrides(request: dict[str, Any]) -> dict[str, Any]:
+        overrides = request.get("overrides", {})
+        return dict(overrides) if isinstance(overrides, dict) else {}
 
     @staticmethod
     def _voice_result(result) -> dict[str, Any]:

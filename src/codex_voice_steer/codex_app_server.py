@@ -153,48 +153,50 @@ class CodexAppServer:
             return str(nested["id"])
         return ""
 
-    def ensure_thread(self) -> str:
+    def ensure_thread(self, config: Config | None = None) -> str:
+        config = config or self.config
         state = self.state_store.load()
-        configured = str(self.config.get("codex.thread_id", "") or self.config.get("codex.resume_thread_id", ""))
+        configured = str(config.get("codex.thread_id", "") or config.get("codex.resume_thread_id", ""))
         thread_id = configured or state.thread_id
         if thread_id:
             try:
-                result = self.request("thread/resume", self._thread_resume_params(thread_id))
+                result = self.request("thread/resume", self._thread_resume_params(thread_id, config))
                 thread = result.get("thread", {})
                 thread_id = str(thread.get("id", thread_id))
                 self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")))
                 return thread_id
             except JsonRpcError:
-                if not self.config.get("codex.create_thread_if_missing", True):
+                if not config.get("codex.create_thread_if_missing", True):
                     raise
-        result = self.request("thread/start", self._thread_start_params())
+        result = self.request("thread/start", self._thread_start_params(config))
         thread = result.get("thread", {})
         thread_id = str(thread.get("id", ""))
-        self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")), cwd=str(thread.get("cwd", self.config.get("codex.cwd", "."))))
+        self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")), cwd=str(thread.get("cwd", config.get("codex.cwd", "."))))
         return thread_id
 
-    def deliver_text(self, text: str, force_steer: bool = False) -> DeliveryResult:
+    def deliver_text(self, text: str, force_steer: bool = False, config: Config | None = None) -> DeliveryResult:
+        config = config or self.config
         state = self.state_store.load()
-        thread_id = self.ensure_thread()
+        thread_id = self.ensure_thread(config)
         self.state_store.append_event("user_final", text=text, source="text")
         active_turn_id = self.state_store.load().active_turn_id
-        if active_turn_id and (force_steer or self.config.get("delivery.when_active", "steer") == "steer"):
+        if active_turn_id and (force_steer or config.get("delivery.when_active", "steer") == "steer"):
             try:
                 result = self.request(
                     "turn/steer",
-                    {"threadId": thread_id, "expectedTurnId": active_turn_id, "input": [self._text_input(text)]},
+                    {"threadId": thread_id, "expectedTurnId": active_turn_id, "input": [self._text_input(text, config)]},
                 )
                 turn = result.get("turn", {})
                 self.state_store.append_event("sent", action="turn/steer", thread_id=thread_id, turn_id=str(turn.get("id", active_turn_id)))
                 return DeliveryResult(action="turn/steer", thread_id=thread_id, turn_id=str(turn.get("id", active_turn_id)))
             except JsonRpcError:
-                if self.config.get("delivery.when_not_steerable", "queue") == "queue":
+                if config.get("delivery.when_not_steerable", "queue") == "queue":
                     queued = state.queued_inputs or []
                     queued.append(text)
                     self.state_store.update(queued_inputs=queued)
                     return DeliveryResult(action="queue", thread_id=thread_id, queued=True)
                 raise
-        result = self.request("turn/start", self._turn_start_params(thread_id, text))
+        result = self.request("turn/start", self._turn_start_params(thread_id, text, config))
         turn = result.get("turn", {})
         turn_id = str(turn.get("id", ""))
         self.state_store.update(active_turn_id=turn_id)
@@ -211,60 +213,65 @@ class CodexAppServer:
         self.state_store.update(active_turn_id="")
         return DeliveryResult(action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id)
 
-    def _thread_start_params(self) -> dict[str, Any]:
+    def _thread_start_params(self, config: Config | None = None) -> dict[str, Any]:
+        config = config or self.config
         params: dict[str, Any] = {
-            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
-            "developerInstructions": self._developer_instructions(),
-            "model": self.config.get("codex.model", None),
-            "personality": self.config.get("codex.personality", "pragmatic"),
-            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
-            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
-            "config": {"default_permissions": self.config.get("codex.permissions", ":workspace")},
+            "cwd": str(Path(str(config.get("codex.cwd", "."))).resolve()),
+            "developerInstructions": self._developer_instructions(config),
+            "model": config.get("codex.model", None),
+            "personality": config.get("codex.personality", "pragmatic"),
+            "approvalPolicy": config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": config.get("codex.approvals_reviewer", "auto_review"),
+            "config": {"default_permissions": config.get("codex.permissions", ":workspace")},
             "serviceName": "codex-voice-steer",
             "sessionStartSource": "startup",
             "threadSource": "user",
         }
-        if self.config.get("codex.fast", False):
+        if config.get("codex.fast", False):
             params["serviceTier"] = "fast"
         return params
 
-    def _thread_resume_params(self, thread_id: str) -> dict[str, Any]:
+    def _thread_resume_params(self, thread_id: str, config: Config | None = None) -> dict[str, Any]:
+        config = config or self.config
         return {
             "threadId": thread_id,
-            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
-            "developerInstructions": self._developer_instructions(),
-            "model": self.config.get("codex.model", None),
-            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
-            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
-            "config": {"default_permissions": self.config.get("codex.permissions", ":workspace")},
+            "cwd": str(Path(str(config.get("codex.cwd", "."))).resolve()),
+            "developerInstructions": self._developer_instructions(config),
+            "model": config.get("codex.model", None),
+            "approvalPolicy": config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": config.get("codex.approvals_reviewer", "auto_review"),
+            "config": {"default_permissions": config.get("codex.permissions", ":workspace")},
         }
 
-    def _turn_start_params(self, thread_id: str, text: str) -> dict[str, Any]:
+    def _turn_start_params(self, thread_id: str, text: str, config: Config | None = None) -> dict[str, Any]:
+        config = config or self.config
         params: dict[str, Any] = {
             "threadId": thread_id,
-            "input": [self._text_input(text)],
-            "cwd": str(Path(str(self.config.get("codex.cwd", "."))).resolve()),
-            "model": self.config.get("codex.model", None),
-            "effort": self.config.get("codex.effort", "medium"),
-            "summary": self.config.get("codex.summary", "concise"),
-            "personality": self.config.get("codex.personality", "pragmatic"),
-            "approvalPolicy": self.config.get("codex.approval_policy", "on-request"),
-            "approvalsReviewer": self.config.get("codex.approvals_reviewer", "auto_review"),
+            "input": [self._text_input(text, config)],
+            "cwd": str(Path(str(config.get("codex.cwd", "."))).resolve()),
+            "model": config.get("codex.model", None),
+            "effort": config.get("codex.effort", "medium"),
+            "summary": config.get("codex.summary", "concise"),
+            "personality": config.get("codex.personality", "pragmatic"),
+            "approvalPolicy": config.get("codex.approval_policy", "on-request"),
+            "approvalsReviewer": config.get("codex.approvals_reviewer", "auto_review"),
         }
-        if self.config.get("codex.fast", False):
+        if config.get("codex.fast", False):
             params["serviceTier"] = "fast"
         return params
 
-    def _text_input(self, text: str) -> dict[str, str]:
-        if self.config.get("delivery.include_voice_metadata", True):
-            wake = self.config.get("wake.word", "scarlett")
+    def _text_input(self, text: str, config: Config | None = None) -> dict[str, str]:
+        config = config or self.config
+        if config.get("delivery.include_voice_metadata", True):
+            wake = config.get("wake.word", "scarlett")
             text = f"[cxv voice/text input; wake={wake}]\n{text}"
         return {"type": "text", "text": text}
 
-    def _developer_instructions(self) -> str:
-        if self.config.get("instructions.mode", "inject") != "inject":
+    def _developer_instructions(self, config: Config | None = None) -> str:
+        config = config or self.config
+        if config.get("instructions.mode", "inject") != "inject":
             return ""
-        parts = [str(self.config.get("instructions.developer_instructions", ""))]
-        if self.config.get("instructions.msd.enabled", False):
-            parts.append(str(self.config.get("instructions.msd.developer_instructions", "")))
+        parts = [str(config.get("instructions.developer_instructions", ""))]
+        if config.get("instructions.msd.enabled", False):
+            parts.append(str(config.get("instructions.msd.developer_instructions", "")))
         return "\n\n".join(part for part in parts if part.strip())

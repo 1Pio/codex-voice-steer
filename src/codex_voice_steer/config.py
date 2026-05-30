@@ -157,6 +157,11 @@ class Config:
             current = current[part]
         return current
 
+    def with_overrides(self, overrides: dict[str, Any] | None) -> "Config":
+        if not overrides:
+            return self
+        return Config(data=deep_merge(self.data, overrides), path=self.path, loaded=self.loaded)
+
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(base)

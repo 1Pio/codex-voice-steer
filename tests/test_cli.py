@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codex_voice_steer.cli import build_parser
+from codex_voice_steer.cli import _payload, build_parser
 
 
 def test_core_commands_parse() -> None:
@@ -42,3 +42,9 @@ def test_voice_test_audio_parses() -> None:
     assert args.voice_command == "test-audio"
     assert args.wav == "/tmp/turn.wav"
     assert args.send is True
+
+
+def test_daemon_payload_includes_cli_overrides() -> None:
+    args = build_parser().parse_args(["--cwd", "/tmp/cxv-cwd", "--model", "gpt-test", "text", "hello"])
+    payload = _payload(args, "text", text="hello")
+    assert payload["overrides"] == {"codex": {"cwd": "/tmp/cxv-cwd", "model": "gpt-test"}}

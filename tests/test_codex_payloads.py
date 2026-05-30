@@ -13,7 +13,7 @@ class FakeBridge(CodexAppServer):
         self.fail_steer = fail_steer
         self.requests: list[tuple[str, dict[str, Any]]] = []
 
-    def ensure_thread(self) -> str:
+    def ensure_thread(self, config=None) -> str:
         state = self.state_store.load()
         thread_id = state.thread_id or "thread_1"
         self.state_store.update(thread_id=thread_id)
@@ -95,6 +95,19 @@ def test_deliver_text_queues_when_active_turn_is_not_steerable(tmp_path) -> None
     result = bridge.deliver_text("queue this", force_steer=True)
     assert result.action == "queue"
     assert store.load().queued_inputs == ["queue this"]
+
+
+def test_deliver_text_uses_invocation_config_overrides(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    override = cfg.with_overrides({"codex": {"cwd": str(tmp_path), "model": "gpt-test"}})
+    store = StateStore(tmp_path / "state.json")
+    bridge = FakeBridge(cfg, state_store=store)
+    result = bridge.deliver_text("use override", config=override)
+    method, params = bridge.requests[-1]
+    assert result.action == "turn/start"
+    assert method == "turn/start"
+    assert params["cwd"] == str(tmp_path.resolve())
+    assert params["model"] == "gpt-test"
 
 
 def test_interrupt_sends_active_turn_id(tmp_path) -> None:

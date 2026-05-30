@@ -133,7 +133,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
 async def _daemon_command(args: argparse.Namespace, config: Config) -> int:
     await ensure_daemon(config, no_start=args.no_start)
     if args.command == "listen":
-        response = await send_request(config, {"command": "listen"})
+        response = await send_request(config, _payload(args, "listen"))
     elif args.command == "pause":
         response = await send_request(config, {"command": "pause"})
     elif args.command in {"text", "ttt", "steer"}:
@@ -141,7 +141,7 @@ async def _daemon_command(args: argparse.Namespace, config: Config) -> int:
         if not text:
             raise ValueError(f"cxv {args.command} requires text")
         command = "steer" if args.command == "steer" else "text"
-        response = await send_request(config, {"command": command, "text": text})
+        response = await send_request(config, _payload(args, command, text=text))
     elif args.command in {"interrupt", "stop"}:
         response = await send_request(config, {"command": "interrupt"})
     elif args.command == "bind":
@@ -149,11 +149,19 @@ async def _daemon_command(args: argparse.Namespace, config: Config) -> int:
     elif args.command == "voice":
         if args.voice_command != "test-audio":
             raise ValueError(f"unsupported voice command: {args.voice_command}")
-        response = await send_request(config, {"command": "voice-test-audio", "wav": args.wav, "send": args.send})
+        response = await send_request(config, _payload(args, "voice-test-audio", wav=args.wav, send=args.send))
     else:
         raise ValueError(f"unsupported daemon command: {args.command}")
     print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") else 1
+
+
+def _payload(args: argparse.Namespace, command: str, **fields: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"command": command, **fields}
+    overrides = _overrides_from_args(args)
+    if overrides:
+        payload["overrides"] = overrides
+    return payload
 
 
 def _status(config: Config) -> int:
