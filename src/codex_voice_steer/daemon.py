@@ -31,9 +31,18 @@ class CxvDaemon:
             self.socket_path.unlink()
         self.pid_path.write_text(str(os.getpid()))
         server = await asyncio.start_unix_server(self._handle_client, path=str(self.socket_path))
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop_event.set)
+            except NotImplementedError:
+                pass
         try:
             async with server:
-                await server.serve_forever()
+                await stop_event.wait()
+                server.close()
+                await server.wait_closed()
         finally:
             if self.socket_path.exists():
                 self.socket_path.unlink()
