@@ -36,6 +36,20 @@ def test_thread_start_injects_developer_instructions(tmp_path) -> None:
     assert params["config"]["default_permissions"] == ":workspace"
 
 
+def test_native_agent_mode_falls_back_to_injected_instructions(tmp_path) -> None:
+    cfg = load_config(overrides={"instructions": {"mode": "native_agent"}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    params = bridge._thread_start_params()
+    assert "controlled through codex-voice-steer" in params["developerInstructions"]
+
+
+def test_unknown_instruction_mode_disables_injected_instructions(tmp_path) -> None:
+    cfg = load_config(overrides={"instructions": {"mode": "off"}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    params = bridge._thread_start_params()
+    assert params["developerInstructions"] == ""
+
+
 def test_text_input_contains_voice_metadata(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     bridge = CodexAppServer(cfg)

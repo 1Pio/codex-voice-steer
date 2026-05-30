@@ -269,7 +269,8 @@ class CodexAppServer:
 
     def _developer_instructions(self, config: Config | None = None) -> str:
         config = config or self.config
-        if config.get("instructions.mode", "inject") != "inject":
+        mode = str(config.get("instructions.mode", "inject"))
+        if mode not in {"inject", "native_agent"}:
             return ""
         parts = [str(config.get("instructions.developer_instructions", ""))]
         if config.get("instructions.msd.enabled", False):
