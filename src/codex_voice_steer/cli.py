@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
-from .audio import input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, record_input_wav
+from .audio import input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, play_wav, record_input_wav
 from .calibration import calibrate_wake
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
@@ -101,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
     audio_loopback.add_argument("--output-device", default="default", help="Temporary output device override by index or name.")
     audio_loopback.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
     audio_loopback.add_argument("--json", action="store_true", help="Print loopback capture details as JSON.")
+    audio_play = audio_sub.add_parser("play", help="Play a WAV to an output device for controlled loopback tests.")
+    audio_play.add_argument("source_wav", help="PCM16 WAV to play to the output device.")
+    audio_play.add_argument("--output-device", default="default", help="Temporary output device override by index or name.")
+    audio_play.add_argument("--json", action="store_true", help="Print playback details as JSON.")
     audio_meter = audio_sub.add_parser("meter", help="Print live input RMS/peak levels for the configured device.")
     audio_meter.add_argument("--seconds", type=float, default=5.0, help="Duration to monitor.")
     audio_meter.add_argument("--interval-ms", type=int, default=500, help="Level reporting interval.")
@@ -330,6 +334,13 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
         else:
             print(f"played {result.source_wav_path} to output {result.output_device}; captured {result.seconds:.2f}s from {result.device}: {result.wav_path}")
             print("Verify route with: cxv wake test-audio " + str(result.wav_path))
+        return 0
+    if args.audio_command == "play":
+        result = play_wav(Path(args.source_wav), output_device=str(args.output_device))
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(f"played {result.seconds:.2f}s to output {result.output_device}: {result.source_wav_path}")
         return 0
     if args.audio_command == "meter":
         cfg = config or load_config()

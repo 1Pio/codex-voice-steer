@@ -79,6 +79,26 @@ class AudioLoopbackResult(AudioRecordResult):
 
 
 @dataclass(frozen=True)
+class AudioPlayResult:
+    source_wav_path: Path
+    sample_rate: int
+    channels: int
+    samples: int
+    seconds: float
+    output_device: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source_wav_path": str(self.source_wav_path),
+            "sample_rate": self.sample_rate,
+            "channels": self.channels,
+            "samples": self.samples,
+            "seconds": self.seconds,
+            "output_device": self.output_device,
+        }
+
+
+@dataclass(frozen=True)
 class AudioLevel:
     elapsed_sec: float
     rms: float
@@ -394,6 +414,43 @@ def play_and_record_input_wav(
         clipped_samples=clipped_samples,
         clipped_ratio=clipped_ratio,
         source_wav_path=source_wav_path,
+        output_device=output_device,
+    )
+
+
+def play_wav(source_wav_path: Path, output_device: str = "default") -> AudioPlayResult:
+    output_device_arg = _device_arg(output_device)
+    with wave.open(str(source_wav_path), "rb") as source:
+        channels = source.getnchannels()
+        sample_width = source.getsampwidth()
+        sample_rate = source.getframerate()
+        if sample_width != 2:
+            raise ValueError(f"playback source audio must be PCM16 WAV (got {sample_width * 8}-bit)")
+        blocksize = int(sample_rate * 80 / 1000)
+        total_samples = source.getnframes()
+
+        import sounddevice as sd
+
+        played_samples = 0
+        with sd.RawOutputStream(
+            samplerate=sample_rate,
+            blocksize=blocksize,
+            device=output_device_arg,
+            channels=channels,
+            dtype="int16",
+        ) as output_stream:
+            while True:
+                data = source.readframes(blocksize)
+                if not data:
+                    break
+                output_stream.write(data)
+                played_samples += len(data) // (channels * 2)
+    return AudioPlayResult(
+        source_wav_path=source_wav_path,
+        sample_rate=sample_rate,
+        channels=channels,
+        samples=played_samples,
+        seconds=played_samples / sample_rate,
         output_device=output_device,
     )
 

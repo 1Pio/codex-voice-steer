@@ -128,6 +128,15 @@ def test_audio_loopback_test_parses() -> None:
     assert args.json is True
 
 
+def test_audio_play_parses() -> None:
+    args = build_parser().parse_args(["audio", "play", "/tmp/source.wav", "--output-device", "3", "--json"])
+    assert args.command == "audio"
+    assert args.audio_command == "play"
+    assert args.source_wav == "/tmp/source.wav"
+    assert args.output_device == "3"
+    assert args.json is True
+
+
 def test_audio_meter_parses() -> None:
     args = build_parser().parse_args(["audio", "meter", "--seconds", "2", "--interval-ms", "250", "--device", "0", "--gain-db", "6", "--jsonl"])
     assert args.command == "audio"

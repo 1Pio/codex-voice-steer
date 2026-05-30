@@ -8,7 +8,7 @@ import wave
 import pytest
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, record_input_wav
+from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, play_wav, record_input_wav
 from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 
@@ -258,6 +258,44 @@ def test_play_and_record_input_wav_captures_loopback_route(tmp_path, monkeypatch
     with wave.open(str(result.wav_path), "rb") as wav:
         assert wav.getframerate() == 16000
         assert wav.getnframes() == 1280
+
+
+def test_play_wav_writes_source_to_output_device(tmp_path, monkeypatch) -> None:
+    source_path = tmp_path / "source.wav"
+    with wave.open(str(source_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(b"\1\0" * 1280)
+        wav.writeframes(b"\2\0" * 640)
+
+    seen = {"writes": []}
+    fake_sd = types.ModuleType("sounddevice")
+
+    class RawOutputStream:
+        def __init__(self, **kwargs):
+            seen["output"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            pass
+
+        def write(self, data):
+            seen["writes"].append(data)
+
+    fake_sd.RawOutputStream = RawOutputStream
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+    result = play_wav(source_path, output_device="3")
+
+    assert seen["output"]["device"] == 3
+    assert seen["writes"] == [b"\1\0" * 1280, b"\2\0" * 640]
+    assert result.samples == 1920
+    assert result.seconds == pytest.approx(0.12)
+    assert result.output_device == "3"
+    assert result.to_dict()["source_wav_path"] == str(source_path)
 
 
 def test_input_levels_reports_windowed_rms_and_peak(tmp_path, monkeypatch) -> None:
