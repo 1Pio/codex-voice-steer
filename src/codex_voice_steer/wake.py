@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import wave
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
+from .audio import pcm16_level_stats
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,9 @@ class WakeAudioTest:
     frame_count: int
     sample_rate: int
     channels: int
+    max_score_time_sec: float
+    rms: float
+    peak: int
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -34,6 +39,9 @@ class WakeAudioTest:
             "frame_count": self.frame_count,
             "sample_rate": self.sample_rate,
             "channels": self.channels,
+            "max_score_time_sec": self.max_score_time_sec,
+            "rms": self.rms,
+            "peak": self.peak,
         }
 
 
@@ -97,7 +105,11 @@ def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = N
     detector = OpenWakeWordDetector(config)
     threshold = detector.sensitivity if threshold is None else threshold
     max_score = 0.0
+    max_score_time_sec = 0.0
     frame_count = 0
+    level_samples = 0
+    sum_squares = 0.0
+    peak = 0
     target_samples = int(int(config.get("audio.sample_rate", 16000)) * 80 / 1000)
 
     with wave.open(str(wav_path), "rb") as wav:
@@ -113,10 +125,18 @@ def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = N
             chunk = wav.readframes(target_samples)
             if not chunk:
                 break
-            frame_count += 1
             if len(chunk) < target_samples * 2:
                 chunk += b"\0" * (target_samples * 2 - len(chunk))
-            max_score = max(max_score, detector.score(chunk))
+            stats = pcm16_level_stats(chunk)
+            level_samples += int(stats["samples"])
+            sum_squares += float(stats["sum_squares"])
+            peak = max(peak, int(stats["peak"]))
+            score = detector.score(chunk)
+            if score > max_score:
+                max_score = score
+                max_score_time_sec = frame_count * target_samples / sample_rate
+            frame_count += 1
+    rms = math.sqrt(sum_squares / level_samples) if level_samples else 0.0
 
     return WakeAudioTest(
         wav_path=wav_path,
@@ -126,4 +146,7 @@ def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = N
         frame_count=frame_count,
         sample_rate=sample_rate,
         channels=channels,
+        max_score_time_sec=max_score_time_sec,
+        rms=rms,
+        peak=peak,
     )

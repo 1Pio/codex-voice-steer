@@ -4,6 +4,8 @@ import sys
 import types
 import wave
 
+import pytest
+
 from codex_voice_steer import audio
 from codex_voice_steer.audio import MicCapture, audio_readiness, list_input_devices, record_input_wav
 from codex_voice_steer.config import load_config
@@ -167,6 +169,9 @@ def test_record_input_wav_writes_fixed_duration_capture(tmp_path, monkeypatch) -
     assert result.wav_path == wav_path
     assert result.samples == 1920
     assert result.device == "Loopback Input"
+    assert result.rms == pytest.approx(2**0.5)
+    assert result.peak == 2
+    assert result.to_dict()["rms"] == pytest.approx(2**0.5)
     with wave.open(str(wav_path), "rb") as wav:
         assert wav.getframerate() == 16000
         assert wav.getnchannels() == 1

@@ -104,6 +104,7 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
         wav.setsampwidth(2)
         wav.setframerate(16000)
         wav.writeframes(b"\0" * 1280 * 2)
+        wav.writeframes(b"\1\0" * 1280)
 
     openwakeword = types.ModuleType("openwakeword")
     openwakeword.__path__ = []
@@ -112,11 +113,14 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
     model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
 
     class Model:
+        calls = 0
+
         def __init__(self, wakeword_models):
             pass
 
         def predict(self, frame):
-            return {"scarlett": 0.7}
+            self.__class__.calls += 1
+            return {"scarlett": 0.4 if self.__class__.calls == 1 else 0.7}
 
     model_module.Model = Model
     monkeypatch.setitem(sys.modules, "openwakeword", openwakeword)
@@ -125,4 +129,8 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
     result = score_wake_audio(load_config(path=cfg_path), wav_path)
     assert result.hit is True
     assert result.max_score == 0.7
-    assert result.frame_count == 1
+    assert result.frame_count == 2
+    assert result.max_score_time_sec == 0.08
+    assert result.rms > 0
+    assert result.peak == 1
+    assert result.to_dict()["max_score_time_sec"] == 0.08

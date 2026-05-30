@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import math
+import struct
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +42,8 @@ class AudioRecordResult:
     samples: int
     seconds: float
     device: str
+    rms: float
+    peak: int
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -49,6 +53,8 @@ class AudioRecordResult:
             "samples": self.samples,
             "seconds": self.seconds,
             "device": self.device,
+            "rms": self.rms,
+            "peak": self.peak,
         }
 
 
@@ -172,6 +178,9 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
     channels = int(config.get("audio.channels", 1))
     target_samples = int(sample_rate * seconds)
     captured_samples = 0
+    level_samples = 0
+    sum_squares = 0.0
+    peak = 0
     wav_path.parent.mkdir(parents=True, exist_ok=True)
     capture = MicCapture(config)
     with wave.open(str(wav_path), "wb") as wav:
@@ -183,8 +192,14 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
             if remaining <= 0:
                 break
             take_samples = min(frame.samples, remaining)
-            wav.writeframes(frame.pcm16[: take_samples * channels * 2])
+            chunk = frame.pcm16[: take_samples * channels * 2]
+            stats = pcm16_level_stats(chunk)
+            level_samples += int(stats["samples"])
+            sum_squares += stats["sum_squares"]
+            peak = max(peak, int(stats["peak"]))
+            wav.writeframes(chunk)
             captured_samples += take_samples
+    rms = math.sqrt(sum_squares / level_samples) if level_samples else 0.0
     return AudioRecordResult(
         wav_path=wav_path,
         sample_rate=sample_rate,
@@ -192,7 +207,23 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
         samples=captured_samples,
         seconds=captured_samples / sample_rate,
         device=str(config.get("audio.device", "default")),
+        rms=rms,
+        peak=peak,
     )
+
+
+def pcm16_level_stats(pcm16: bytes) -> dict[str, float | int]:
+    sample_count = 0
+    sum_squares = 0.0
+    peak = 0
+    for (sample,) in struct.iter_unpack("<h", pcm16[: len(pcm16) - (len(pcm16) % 2)]):
+        value = int(sample)
+        magnitude = abs(value)
+        peak = max(peak, magnitude)
+        sum_squares += float(value * value)
+        sample_count += 1
+    rms = math.sqrt(sum_squares / sample_count) if sample_count else 0.0
+    return {"samples": sample_count, "sum_squares": sum_squares, "rms": rms, "peak": peak}
 
 
 def wav_frames(config: Config, wav_path: Path, chunk_ms: int = 80) -> Iterator[AudioFrame]:
