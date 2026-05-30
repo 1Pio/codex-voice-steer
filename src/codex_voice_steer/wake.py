@@ -22,6 +22,12 @@ def wake_readiness(config: Config, repo_root: Path | None = None) -> WakeReadine
         return WakeReadiness(False, "openwakeword Python package is not installed", model_path)
     if not model_path.exists():
         return WakeReadiness(False, f"custom wake model missing: {model_path}", model_path)
+    try:
+        from openwakeword.model import Model
+
+        Model(wakeword_models=[str(model_path)])
+    except Exception as exc:
+        return WakeReadiness(False, f"custom wake model failed to load: {exc}", model_path)
     return WakeReadiness(True, "openwakeword and custom scarlett model are present", model_path)
 
 
