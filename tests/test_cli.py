@@ -52,6 +52,16 @@ def test_audio_devices_parses() -> None:
     assert args.json is True
 
 
+def test_audio_record_parses() -> None:
+    args = build_parser().parse_args(["audio", "record", "/tmp/in.wav", "--seconds", "1.5", "--device", "2", "--json"])
+    assert args.command == "audio"
+    assert args.audio_command == "record"
+    assert args.wav == "/tmp/in.wav"
+    assert args.seconds == 1.5
+    assert args.device == "2"
+    assert args.json is True
+
+
 def test_daemon_payload_includes_cli_overrides() -> None:
     args = build_parser().parse_args(["--cwd", "/tmp/cxv-cwd", "--model", "gpt-test", "text", "hello"])
     payload = _payload(args, "text", text="hello")

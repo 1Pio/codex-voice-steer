@@ -32,6 +32,26 @@ class AudioDevice:
         }
 
 
+@dataclass(frozen=True)
+class AudioRecordResult:
+    wav_path: Path
+    sample_rate: int
+    channels: int
+    samples: int
+    seconds: float
+    device: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "wav_path": str(self.wav_path),
+            "sample_rate": self.sample_rate,
+            "channels": self.channels,
+            "samples": self.samples,
+            "seconds": self.seconds,
+            "device": self.device,
+        }
+
+
 def audio_readiness(config: Config | None = None, probe_stream: bool = False) -> AudioReadiness:
     if importlib.util.find_spec("sounddevice") is None:
         return AudioReadiness(False, "sounddevice is not installed, so microphone capture is unavailable")
@@ -143,6 +163,36 @@ class MicCapture:
             while True:
                 data, _overflowed = stream.read(self.blocksize)
                 yield AudioFrame(pcm16=bytes(data), sample_rate=self.sample_rate, channels=self.channels)
+
+
+def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRecordResult:
+    if seconds <= 0:
+        raise ValueError("record duration must be greater than zero")
+    sample_rate = int(config.get("audio.sample_rate", 16000))
+    channels = int(config.get("audio.channels", 1))
+    target_samples = int(sample_rate * seconds)
+    captured_samples = 0
+    wav_path.parent.mkdir(parents=True, exist_ok=True)
+    capture = MicCapture(config)
+    with wave.open(str(wav_path), "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        for frame in capture.frames():
+            remaining = target_samples - captured_samples
+            if remaining <= 0:
+                break
+            take_samples = min(frame.samples, remaining)
+            wav.writeframes(frame.pcm16[: take_samples * channels * 2])
+            captured_samples += take_samples
+    return AudioRecordResult(
+        wav_path=wav_path,
+        sample_rate=sample_rate,
+        channels=channels,
+        samples=captured_samples,
+        seconds=captured_samples / sample_rate,
+        device=str(config.get("audio.device", "default")),
+    )
 
 
 def wav_frames(config: Config, wav_path: Path, chunk_ms: int = 80) -> Iterator[AudioFrame]:

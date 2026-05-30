@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import sys
 import types
+import wave
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import MicCapture, audio_readiness, list_input_devices
+from codex_voice_steer.audio import MicCapture, audio_readiness, list_input_devices, record_input_wav
 from codex_voice_steer.config import load_config
+from codex_voice_steer.segment import AudioFrame
 
 
 def test_audio_readiness_checks_configured_device_name(tmp_path, monkeypatch) -> None:
@@ -145,3 +147,28 @@ def test_list_input_devices_marks_implicit_default_by_name(monkeypatch) -> None:
     devices = list_input_devices()
     assert devices[0].is_default is True
     assert devices[1].is_default is False
+
+
+def test_record_input_wav_writes_fixed_duration_capture(tmp_path, monkeypatch) -> None:
+    class FakeMicCapture:
+        def __init__(self, config):
+            self.config = config
+
+        def frames(self):
+            yield AudioFrame(pcm16=b"\1\0" * 1280, sample_rate=16000, channels=1)
+            yield AudioFrame(pcm16=b"\2\0" * 1280, sample_rate=16000, channels=1)
+
+    monkeypatch.setattr(audio, "MicCapture", FakeMicCapture)
+    cfg = load_config(overrides={"audio": {"device": "Loopback Input"}}, path=tmp_path / "missing.toml")
+    wav_path = tmp_path / "capture.wav"
+
+    result = record_input_wav(cfg, wav_path, seconds=0.12)
+
+    assert result.wav_path == wav_path
+    assert result.samples == 1920
+    assert result.device == "Loopback Input"
+    with wave.open(str(wav_path), "rb") as wav:
+        assert wav.getframerate() == 16000
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+        assert wav.getnframes() == 1920

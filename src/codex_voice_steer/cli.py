@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
-from .audio import list_input_devices
+from .audio import list_input_devices, record_input_wav
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     audio_sub = audio.add_subparsers(dest="audio_command", required=True)
     audio_devices = audio_sub.add_parser("devices", help="List available input devices for audio.device.")
     audio_devices.add_argument("--json", action="store_true", help="Print device list as JSON.")
+    audio_record = audio_sub.add_parser("record", help="Record configured input to a 16 kHz mono PCM16 WAV.")
+    audio_record.add_argument("wav", help="Output WAV path.")
+    audio_record.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
+    audio_record.add_argument("--device", help="Temporary input device override by index or name.")
+    audio_record.add_argument("--json", action="store_true", help="Print capture details as JSON.")
 
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
     wake_sub = wake.add_subparsers(dest="wake_command", required=True)
@@ -135,7 +140,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         print(render_doctor(run_doctor(config)))
         return 0
     if args.command == "audio":
-        return _audio_command(args)
+        return _audio_command(args, config)
     if args.command == "wake":
         return _wake_command(args, config)
     if args.command == "agents":
@@ -266,13 +271,24 @@ def _agents_command(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown agents command: {args.agents_command}")
 
 
-def _audio_command(args: argparse.Namespace) -> int:
+def _audio_command(args: argparse.Namespace, config: Config | None = None) -> int:
     if args.audio_command == "devices":
         devices = list_input_devices()
         if args.json:
             print(json.dumps([device.to_dict() for device in devices], indent=2, sort_keys=True))
         else:
             print(_render_audio_devices(devices))
+        return 0
+    if args.audio_command == "record":
+        cfg = config or load_config()
+        if args.device:
+            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        result = record_input_wav(cfg, Path(args.wav), seconds=float(args.seconds))
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(f"recorded {result.seconds:.2f}s from {result.device}: {result.wav_path}")
+            print("Verify with: cxv wake test-audio " + str(result.wav_path))
         return 0
     raise ValueError(f"unknown audio command: {args.audio_command}")
 
