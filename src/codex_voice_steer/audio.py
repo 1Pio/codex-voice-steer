@@ -16,6 +16,22 @@ class AudioReadiness:
     reason: str
 
 
+@dataclass(frozen=True)
+class AudioDevice:
+    index: int
+    name: str
+    max_input_channels: int
+    is_default: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "index": self.index,
+            "name": self.name,
+            "max_input_channels": self.max_input_channels,
+            "default": self.is_default,
+        }
+
+
 def audio_readiness(config: Config | None = None) -> AudioReadiness:
     if importlib.util.find_spec("sounddevice") is None:
         return AudioReadiness(False, "sounddevice is not installed, so microphone capture is unavailable")
@@ -32,6 +48,28 @@ def audio_readiness(config: Config | None = None) -> AudioReadiness:
     return AudioReadiness(True, f"microphone input {label!r} available: {device.get('name', 'unknown')}")
 
 
+def list_input_devices() -> list[AudioDevice]:
+    if importlib.util.find_spec("sounddevice") is None:
+        raise RuntimeError("sounddevice is not installed, so audio devices cannot be listed")
+    import sounddevice as sd
+
+    default_input = _default_input_device_index(sd)
+    devices = []
+    for index, device in enumerate(sd.query_devices()):
+        max_input_channels = int(device.get("max_input_channels", 0))
+        if max_input_channels <= 0:
+            continue
+        devices.append(
+            AudioDevice(
+                index=index,
+                name=str(device.get("name", "unknown")),
+                max_input_channels=max_input_channels,
+                is_default=index == default_input,
+            )
+        )
+    return devices
+
+
 def _device_arg(configured: str):
     if configured == "default":
         return None
@@ -41,11 +79,23 @@ def _device_arg(configured: str):
         return configured
 
 
+def _default_input_device_index(sd) -> int | None:
+    try:
+        default = sd.default.device
+        if isinstance(default, (tuple, list)) and default:
+            value = default[0]
+        else:
+            value = default
+        return None if value is None else int(value)
+    except Exception:
+        return None
+
+
 class MicCapture:
     def __init__(self, config: Config, chunk_ms: int = 80) -> None:
         self.sample_rate = int(config.get("audio.sample_rate", 16000))
         self.channels = int(config.get("audio.channels", 1))
-        self.device = None if str(config.get("audio.device", "default")) == "default" else str(config.get("audio.device"))
+        self.device = _device_arg(str(config.get("audio.device", "default")))
         self.blocksize = int(self.sample_rate * chunk_ms / 1000)
 
     def frames(self) -> Iterator[AudioFrame]:

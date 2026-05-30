@@ -31,7 +31,7 @@ def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: in
         print("cxv 0.1.0  codex-voice-steer")
         print(f"wake: {config.get('wake.word', 'scarlett')}     stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     codex: app-server")
     blockers = []
-    for readiness in (audio_readiness(), vad_readiness(), wake_readiness(config)):
+    for readiness in (audio_readiness(config), vad_readiness(), wake_readiness(config)):
         if not readiness.ok:
             blockers.append(readiness.reason)
     if blockers:

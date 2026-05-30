@@ -16,6 +16,8 @@ The current implementation includes the CLI, config, daemon lifecycle, foregroun
 Controlled audio receipts should use file or explicit loopback input, not speaker playback into the microphone:
 
 ```bash
+cxv audio devices
+cxv config set audio.device "Loopback Input"
 cxv wake test-audio /path/to/scarlett.wav
 cxv voice test-audio /path/to/full-turn.wav
 cxv voice test-audio /path/to/full-turn.wav --send

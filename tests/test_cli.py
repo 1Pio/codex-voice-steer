@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from codex_voice_steer.cli import _payload, _render_compact_status, build_parser
+from codex_voice_steer.audio import AudioDevice
+from codex_voice_steer.cli import _payload, _render_audio_devices, _render_compact_status, build_parser
 
 
 def test_core_commands_parse() -> None:
@@ -42,6 +43,13 @@ def test_voice_test_audio_parses() -> None:
     assert args.voice_command == "test-audio"
     assert args.wav == "/tmp/turn.wav"
     assert args.send is True
+
+
+def test_audio_devices_parses() -> None:
+    args = build_parser().parse_args(["audio", "devices", "--json"])
+    assert args.command == "audio"
+    assert args.audio_command == "devices"
+    assert args.json is True
 
 
 def test_daemon_payload_includes_cli_overrides() -> None:
@@ -88,3 +96,15 @@ def test_compact_status_does_not_dump_full_event_history() -> None:
     assert "queued inputs: 1" in output
     assert "old" not in output
     assert "hello " * 20 not in output
+
+
+def test_render_audio_devices_marks_default_and_config_hint() -> None:
+    output = _render_audio_devices(
+        [
+            AudioDevice(index=1, name="Loopback Input", max_input_channels=2),
+            AudioDevice(index=2, name="MacBook Pro Microphone", max_input_channels=1, is_default=True),
+        ]
+    )
+    assert "1: Loopback Input (2 input channel(s))" in output
+    assert "2: MacBook Pro Microphone (1 input channel(s)) *" in output
+    assert "cxv config set audio.device" in output

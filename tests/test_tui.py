@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import types
+
 from codex_voice_steer.config import load_config
+from codex_voice_steer import tui
 from codex_voice_steer.tui import render_event, write_ui
 
 
@@ -29,3 +32,19 @@ def test_tui_jsonl_and_quiet_modes(capsys, tmp_path) -> None:
     quiet_path.write_text('[ui]\nmode = "quiet"\n')
     write_ui(load_config(path=quiet_path), "listening", "listening")
     assert capsys.readouterr().out == ""
+
+
+def test_foreground_preflight_uses_configured_audio_device(tmp_path, monkeypatch) -> None:
+    seen = {}
+    cfg = load_config(overrides={"audio": {"device": "Loopback Input"}}, path=tmp_path / "missing.toml")
+
+    def fake_audio_readiness(config):
+        seen["device"] = config.get("audio.device")
+        return types.SimpleNamespace(ok=False, reason="blocked for test")
+
+    monkeypatch.setattr(tui, "audio_readiness", fake_audio_readiness)
+    monkeypatch.setattr(tui, "vad_readiness", lambda: types.SimpleNamespace(ok=True, reason="ok"))
+    monkeypatch.setattr(tui, "wake_readiness", lambda _config: types.SimpleNamespace(ok=True, reason="ok"))
+
+    assert tui.run_foreground_tui(cfg) == 2
+    assert seen == {"device": "Loopback Input"}

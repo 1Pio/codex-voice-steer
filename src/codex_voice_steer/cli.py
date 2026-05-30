@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
+from .audio import list_input_devices
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
@@ -80,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("models", help="List built-in compatible STT models.")
     sub.add_parser("doctor", help="Check local cxv dependencies and blockers.")
 
+    audio = sub.add_parser("audio", help="Inspect local audio input devices.")
+    audio_sub = audio.add_subparsers(dest="audio_command", required=True)
+    audio_devices = audio_sub.add_parser("devices", help="List available input devices for audio.device.")
+    audio_devices.add_argument("--json", action="store_true", help="Print device list as JSON.")
+
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
     wake_sub = wake.add_subparsers(dest="wake_command", required=True)
     wake_sub.add_parser("training-status", help="Check local Scarlett wake-model training prerequisites.")
@@ -128,6 +134,8 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
     if args.command == "doctor":
         print(render_doctor(run_doctor(config)))
         return 0
+    if args.command == "audio":
+        return _audio_command(args)
     if args.command == "wake":
         return _wake_command(args, config)
     if args.command == "agents":
@@ -255,6 +263,29 @@ def _agents_command(args: argparse.Namespace) -> int:
         print("Select it with: cxv config set codex.agent " + ("cxv-voice-msd" if args.kind == "msd" else "cxv-voice-slim"))
         return 0
     raise ValueError(f"unknown agents command: {args.agents_command}")
+
+
+def _audio_command(args: argparse.Namespace) -> int:
+    if args.audio_command == "devices":
+        devices = list_input_devices()
+        if args.json:
+            print(json.dumps([device.to_dict() for device in devices], indent=2, sort_keys=True))
+        else:
+            print(_render_audio_devices(devices))
+        return 0
+    raise ValueError(f"unknown audio command: {args.audio_command}")
+
+
+def _render_audio_devices(devices) -> str:
+    lines = ["cxv audio input devices"]
+    if not devices:
+        lines.append("(none)")
+        return "\n".join(lines)
+    for device in devices:
+        marker = " *" if device.is_default else ""
+        lines.append(f"{device.index}: {device.name} ({device.max_input_channels} input channel(s)){marker}")
+    lines.append("Use one with: cxv config set audio.device <index-or-name>")
+    return "\n".join(lines)
 
 
 def _wake_command(args: argparse.Namespace, config: Config) -> int:
