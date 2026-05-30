@@ -54,6 +54,8 @@ def wake_readiness(config: Config, repo_root: Path | None = None) -> WakeReadine
             packaged = _packaged_wake_model_path()
             if packaged.exists():
                 model_path = packaged
+    if not config.get("wake.enabled", True):
+        return WakeReadiness(False, "wake.enabled=false is unsupported in V1; custom wake detection is required", model_path)
     if importlib.util.find_spec("openwakeword") is None:
         return WakeReadiness(False, "openwakeword Python package is not installed", model_path)
     if not model_path.exists():

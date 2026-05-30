@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from codex_voice_steer.audio import AudioDevice
+from codex_voice_steer import cli
 from codex_voice_steer.cli import _payload, _render_audio_devices, _render_compact_status, build_parser
+from codex_voice_steer.config import load_config
 
 
 def test_core_commands_parse() -> None:
@@ -161,3 +165,13 @@ def test_render_audio_devices_marks_default_and_config_hint() -> None:
     assert "1: Loopback Input (2 input channel(s))" in output
     assert "2: MacBook Pro Microphone (1 input channel(s)) *" in output
     assert "cxv config set audio.device" in output
+
+
+def test_doctor_returns_nonzero_when_any_check_blocks(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(cli, "run_doctor", lambda _config: [SimpleNamespace(ok=True), SimpleNamespace(ok=False)])
+    monkeypatch.setattr(cli, "render_doctor", lambda _checks: "cxv doctor\nblocked test: no")
+
+    result = cli.dispatch(build_parser().parse_args(["doctor"]), load_config(path=tmp_path / "missing.toml"))
+
+    assert result == 1
+    assert "blocked test" in capsys.readouterr().out

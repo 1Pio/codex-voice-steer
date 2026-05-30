@@ -35,6 +35,18 @@ def test_wake_readiness_rejects_unloadable_model(tmp_path, monkeypatch) -> None:
     assert "failed to load" in readiness.reason
 
 
+def test_wake_readiness_rejects_disabled_wake_in_v1(tmp_path) -> None:
+    model_path = tmp_path / "scarlett.onnx"
+    model_path.write_bytes(b"fake")
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(f'[wake]\nmodel_path = "{model_path}"\nenabled = false\n')
+
+    readiness = wake_readiness(load_config(path=cfg_path), repo_root=tmp_path)
+
+    assert readiness.ok is False
+    assert "unsupported in V1" in readiness.reason
+
+
 def test_wake_detector_converts_pcm_bytes_to_int16_array(tmp_path, monkeypatch) -> None:
     model_path = tmp_path / "scarlett.onnx"
     model_path.write_bytes(b"fake")

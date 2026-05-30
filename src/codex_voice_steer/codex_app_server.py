@@ -178,10 +178,16 @@ class CodexAppServer:
     def deliver_text(self, text: str, force_steer: bool = False, config: Config | None = None) -> DeliveryResult:
         config = config or self.config
         state = self.state_store.load()
+        active_turn_id = state.active_turn_id
+        when_active = str(config.get("delivery.when_active", "steer"))
+        when_idle = str(config.get("delivery.when_idle", "start"))
+        if when_active not in {"queue", "steer"}:
+            raise ValueError(f"unsupported delivery.when_active: {when_active}")
+        if when_idle != "start":
+            raise ValueError(f"unsupported delivery.when_idle: {when_idle}")
         thread_id = self.ensure_thread(config)
         self.state_store.append_event("user_final", text=text, source="text")
         active_turn_id = self.state_store.load().active_turn_id
-        when_active = str(config.get("delivery.when_active", "steer"))
         if active_turn_id and not force_steer and when_active == "queue":
             queued = state.queued_inputs or []
             queued.append(text)

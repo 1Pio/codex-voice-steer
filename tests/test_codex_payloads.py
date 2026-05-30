@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from codex_voice_steer.codex_app_server import CodexAppServer, JsonRpcError
 from codex_voice_steer.config import load_config
 from codex_voice_steer.state import StateStore
@@ -164,6 +166,30 @@ def test_deliver_text_queues_when_active_policy_is_queue(tmp_path) -> None:
     assert result.action == "queue"
     assert bridge.requests == []
     assert store.load().queued_inputs == ["queue this"]
+
+
+def test_deliver_text_rejects_unsupported_idle_policy_before_thread_work(tmp_path) -> None:
+    cfg = load_config(overrides={"delivery": {"when_idle": "queue"}}, path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = FakeBridge(cfg, state_store=store)
+
+    with pytest.raises(ValueError, match="delivery.when_idle"):
+        bridge.deliver_text("do not send")
+
+    assert bridge.requests == []
+    assert store.load().thread_id == ""
+
+
+def test_deliver_text_rejects_unsupported_active_policy_before_thread_work(tmp_path) -> None:
+    cfg = load_config(overrides={"delivery": {"when_active": "interrupt"}}, path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = FakeBridge(cfg, state_store=store)
+
+    with pytest.raises(ValueError, match="delivery.when_active"):
+        bridge.deliver_text("do not send")
+
+    assert bridge.requests == []
+    assert store.load().thread_id == ""
 
 
 def test_deliver_text_uses_invocation_config_overrides(tmp_path) -> None:

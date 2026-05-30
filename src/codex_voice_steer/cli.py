@@ -153,8 +153,9 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         print(render_models())
         return 0
     if args.command == "doctor":
-        print(render_doctor(run_doctor(config)))
-        return 0
+        checks = run_doctor(config)
+        print(render_doctor(checks))
+        return 0 if all(check.ok for check in checks) else 1
     if args.command == "audio":
         return _audio_command(args, config)
     if args.command == "wake":
