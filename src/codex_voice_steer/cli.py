@@ -11,6 +11,7 @@ from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
 from .audio import input_levels, list_input_devices, record_input_wav
+from .calibration import calibrate_wake
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
@@ -102,6 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     test_audio = wake_sub.add_parser("test-audio", help="Score a 16 kHz mono PCM16 WAV through the wake detector.")
     test_audio.add_argument("wav", help="Path to the WAV file to score.")
     test_audio.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this test.")
+    calibrate = wake_sub.add_parser("calibrate", help="Record a live sample and score it through the wake detector.")
+    calibrate.add_argument("wav", help="Output WAV path for the captured calibration sample.")
+    calibrate.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
+    calibrate.add_argument("--device", help="Temporary input device override by index or name.")
+    calibrate.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this calibration.")
+    calibrate.add_argument("--min-rms", type=float, default=1000.0, help="Minimum RMS for a strong enough live proof.")
+    calibrate.add_argument("--min-peak", type=int, default=4000, help="Minimum peak amplitude for a strong enough live proof.")
 
     voice = sub.add_parser("voice", help="Controlled full-pipeline voice test utilities.")
     voice_sub = voice.add_subparsers(dest="voice_command", required=True)
@@ -329,6 +337,20 @@ def _wake_command(args: argparse.Namespace, config: Config) -> int:
         result = score_wake_audio(config, Path(args.wav), threshold=args.threshold)
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.hit else 1
+    if args.wake_command == "calibrate":
+        cfg = config
+        if args.device:
+            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        result = calibrate_wake(
+            cfg,
+            Path(args.wav),
+            seconds=float(args.seconds),
+            threshold=args.threshold,
+            min_rms=float(args.min_rms),
+            min_peak=int(args.min_peak),
+        )
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        return 0 if result.ok else 1
     raise ValueError(f"unknown wake command: {args.wake_command}")
 
 

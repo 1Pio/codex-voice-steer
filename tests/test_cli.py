@@ -37,6 +37,34 @@ def test_wake_test_audio_parses() -> None:
     assert args.threshold == 0.4
 
 
+def test_wake_calibrate_parses() -> None:
+    args = build_parser().parse_args(
+        [
+            "wake",
+            "calibrate",
+            "/tmp/scarlett-live.wav",
+            "--seconds",
+            "3",
+            "--device",
+            "0",
+            "--threshold",
+            "0.45",
+            "--min-rms",
+            "500",
+            "--min-peak",
+            "2000",
+        ]
+    )
+    assert args.command == "wake"
+    assert args.wake_command == "calibrate"
+    assert args.wav == "/tmp/scarlett-live.wav"
+    assert args.seconds == 3
+    assert args.device == "0"
+    assert args.threshold == 0.45
+    assert args.min_rms == 500
+    assert args.min_peak == 2000
+
+
 def test_voice_test_audio_parses() -> None:
     args = build_parser().parse_args(["voice", "test-audio", "/tmp/turn.wav", "--send"])
     assert args.command == "voice"
