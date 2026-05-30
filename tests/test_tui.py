@@ -4,7 +4,7 @@ import types
 
 from codex_voice_steer.config import load_config
 from codex_voice_steer import tui
-from codex_voice_steer.tui import render_event, write_ui
+from codex_voice_steer.tui import _events_after, _last_event_ts, render_event, write_ui
 
 
 def test_tui_renders_voice_events() -> None:
@@ -49,3 +49,13 @@ def test_foreground_preflight_uses_configured_audio_device(tmp_path, monkeypatch
 
     assert tui.run_foreground_tui(cfg) == 2
     assert seen == {"device": "Loopback Input", "probe_stream": True}
+
+
+def test_tui_event_cursor_survives_capped_history() -> None:
+    before = [{"event": "old", "ts": float(index)} for index in range(200)]
+    after = [{"event": "old", "ts": float(index)} for index in range(1, 200)]
+    after.append({"event": "wake_detected", "ts": 200.0})
+
+    cursor = _last_event_ts(before)
+    assert cursor == 199.0
+    assert _events_after(after, cursor) == [{"event": "wake_detected", "ts": 200.0}]

@@ -58,7 +58,7 @@ def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: in
 async def _run_foreground_listener(config: Config, poll_interval: float, max_polls: int | None) -> int:
     await ensure_daemon(config)
     before = await send_request(config, {"command": "status"})
-    seen = len(before.get("state", {}).get("events", []))
+    last_seen_ts = _last_event_ts(before.get("state", {}).get("events", []))
     response = await send_request(config, {"command": "listen"})
     if not response.get("ok"):
         for blocker in response.get("blockers", []):
@@ -70,11 +70,13 @@ async def _run_foreground_listener(config: Config, poll_interval: float, max_pol
         while True:
             status = await send_request(config, {"command": "status"})
             events = list(status.get("state", {}).get("events", []))
-            for event in events[seen:]:
+            new_events = _events_after(events, last_seen_ts)
+            for event in new_events:
                 rendered = render_event(event, config)
                 if rendered:
                     write_ui(config, str(event.get("event", "event")), rendered, source_event=event)
-            seen = len(events)
+            if new_events:
+                last_seen_ts = _last_event_ts(new_events)
             polls += 1
             if max_polls is not None and polls >= max_polls:
                 return 0
@@ -82,6 +84,23 @@ async def _run_foreground_listener(config: Config, poll_interval: float, max_pol
     finally:
         if max_polls is not None:
             await send_request(config, {"command": "pause"})
+
+
+def _events_after(events: list[dict[str, Any]], timestamp: float) -> list[dict[str, Any]]:
+    return [event for event in events if _event_ts(event) > timestamp]
+
+
+def _last_event_ts(events: list[dict[str, Any]]) -> float:
+    if not events:
+        return 0.0
+    return max((_event_ts(event) for event in events), default=0.0)
+
+
+def _event_ts(event: dict[str, Any]) -> float:
+    try:
+        return float(event.get("ts", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def render_event(event: dict[str, Any], config: Config | None = None) -> str:
