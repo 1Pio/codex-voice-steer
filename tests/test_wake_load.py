@@ -23,7 +23,7 @@ def test_wake_readiness_rejects_unloadable_model(tmp_path, monkeypatch) -> None:
     model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
 
     class Model:
-        def __init__(self, wakeword_models):
+        def __init__(self, wakeword_models, **_kwargs):
             raise RuntimeError("bad model")
 
     model_module.Model = Model
@@ -70,6 +70,38 @@ def test_wake_detector_converts_pcm_bytes_to_int16_array(tmp_path, monkeypatch) 
     assert seen["kwargs"]["inference_framework"] == "onnx"
     assert seen["kwargs"]["melspec_model_path"].endswith("melspectrogram.onnx")
     assert seen["kwargs"]["embedding_model_path"].endswith("embedding_model.onnx")
+
+
+def test_wake_detector_honors_refractory_window(tmp_path, monkeypatch) -> None:
+    model_path = tmp_path / "scarlett.onnx"
+    model_path.write_bytes(b"fake")
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(f'[wake]\nmodel_path = "{model_path}"\nsensitivity = 0.5\nrefractory_ms = 1200\n')
+
+    openwakeword = types.ModuleType("openwakeword")
+    openwakeword.__path__ = []
+    openwakeword.__spec__ = ModuleSpec("openwakeword", loader=None, is_package=True)
+    model_module = types.ModuleType("openwakeword.model")
+    model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
+
+    class Model:
+        def __init__(self, wakeword_models, **_kwargs):
+            pass
+
+        def predict(self, frame):
+            return {"scarlett": 0.99}
+
+    times = iter([10.0, 10.5, 11.3])
+
+    model_module.Model = Model
+    monkeypatch.setitem(sys.modules, "openwakeword", openwakeword)
+    monkeypatch.setitem(sys.modules, "openwakeword.model", model_module)
+    monkeypatch.setattr(wake.time, "monotonic", lambda: next(times))
+
+    detector = OpenWakeWordDetector(load_config(path=cfg_path), repo_root=tmp_path)
+    assert detector.predict(b"\0" * 1280 * 2) is True
+    assert detector.predict(b"\0" * 1280 * 2) is False
+    assert detector.predict(b"\0" * 1280 * 2) is True
 
 
 def test_wake_readiness_falls_back_to_packaged_model(tmp_path, monkeypatch) -> None:

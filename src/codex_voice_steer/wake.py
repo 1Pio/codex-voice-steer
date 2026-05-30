@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,11 +87,19 @@ class OpenWakeWordDetector:
 
         self.word = str(config.get("wake.word", "scarlett"))
         self.sensitivity = float(config.get("wake.sensitivity", 0.5))
+        self.refractory_sec = max(0.0, float(config.get("wake.refractory_ms", 1200)) / 1000)
+        self.last_wake_monotonic = 0.0
         self.model = Model(wakeword_models=[str(readiness.model_path)], **_openwakeword_feature_kwargs())
 
     def predict(self, pcm16_frame) -> bool:
         score = self.score(pcm16_frame)
-        return score >= self.sensitivity
+        if score < self.sensitivity:
+            return False
+        now = time.monotonic()
+        if self.last_wake_monotonic and now - self.last_wake_monotonic < self.refractory_sec:
+            return False
+        self.last_wake_monotonic = now
+        return True
 
     def score(self, pcm16_frame) -> float:
         if isinstance(pcm16_frame, bytes):

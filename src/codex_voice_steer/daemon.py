@@ -30,6 +30,8 @@ class CxvDaemon:
         self.codex: CodexAppServer | None = None
         self.listen_task: asyncio.Task[None] | None = None
         self.listen_overrides: dict[str, Any] = {}
+        self.live_wake: OpenWakeWordDetector | None = None
+        self.live_wake_key: tuple[object, ...] | None = None
 
     async def serve(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,13 +167,25 @@ class CxvDaemon:
         deliver_text = (lambda text: self._codex().deliver_text(text, config=delivery_config)) if send else (lambda _text: None)
         pipeline = VoicePipeline(
             config,
-            wake=OpenWakeWordDetector(config),
+            wake=self._wake_detector(config) if send else OpenWakeWordDetector(config),
             vad=SileroVad(config),
             stt=MacParakeetStt(config),
             deliver_text=deliver_text,
             event_sink=lambda event, fields: self.state_store.append_event(event, **fields),
         )
         return pipeline
+
+    def _wake_detector(self, config: Config) -> OpenWakeWordDetector:
+        key = (
+            str(config.get("wake.model_path", "")),
+            str(config.get("wake.word", "scarlett")),
+            float(config.get("wake.sensitivity", 0.5)),
+            int(config.get("wake.refractory_ms", 1200)),
+        )
+        if self.live_wake is None or self.live_wake_key != key:
+            self.live_wake = OpenWakeWordDetector(config)
+            self.live_wake_key = key
+        return self.live_wake
 
     @staticmethod
     def _voice_delivery_config(config: Config) -> Config:
