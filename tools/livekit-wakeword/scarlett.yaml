@@ -1,0 +1,13 @@
+model_name: scarlett
+
+target_phrases:
+  - "scarlett"
+
+n_samples: 10000
+
+model:
+  model_type: conv_attention
+  model_size: small
+
+steps: 50000
+target_fp_per_hour: 0.2
