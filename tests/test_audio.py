@@ -8,7 +8,7 @@ import wave
 import pytest
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, play_and_record_input_wav, record_input_wav
+from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, record_input_wav
 from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 
@@ -129,6 +129,25 @@ def test_list_input_devices_filters_outputs_and_marks_default(monkeypatch) -> No
     assert [device.name for device in devices] == ["Loopback Input", "MacBook Pro Microphone"]
     assert [device.index for device in devices] == [1, 2]
     assert devices[1].is_default is True
+
+
+def test_list_output_devices_filters_inputs_and_marks_default(monkeypatch) -> None:
+    default = types.SimpleNamespace(device=(0, 1))
+    fake_sd = types.ModuleType("sounddevice")
+    fake_sd.default = default
+    fake_sd.query_devices = lambda: [
+        {"name": "MacBook Pro Microphone", "max_input_channels": 1, "max_output_channels": 0},
+        {"name": "MacBook Pro Speakers", "max_input_channels": 0, "max_output_channels": 2},
+        {"name": "Loopback", "max_input_channels": 2, "max_output_channels": 2},
+    ]
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+    monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _name: object())
+
+    devices = list_output_devices()
+    assert [device.name for device in devices] == ["MacBook Pro Speakers", "Loopback"]
+    assert [device.index for device in devices] == [1, 2]
+    assert devices[0].max_output_channels == 2
+    assert devices[0].is_default is True
 
 
 def test_list_input_devices_marks_implicit_default_by_name(monkeypatch) -> None:

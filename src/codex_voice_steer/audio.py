@@ -22,7 +22,8 @@ class AudioReadiness:
 class AudioDevice:
     index: int
     name: str
-    max_input_channels: int
+    max_input_channels: int = 0
+    max_output_channels: int = 0
     is_default: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -30,6 +31,7 @@ class AudioDevice:
             "index": self.index,
             "name": self.name,
             "max_input_channels": self.max_input_channels,
+            "max_output_channels": self.max_output_channels,
             "default": self.is_default,
         }
 
@@ -139,7 +141,33 @@ def list_input_devices() -> list[AudioDevice]:
                 index=index,
                 name=name,
                 max_input_channels=max_input_channels,
+                max_output_channels=int(device.get("max_output_channels", 0)),
                 is_default=index == default_input or bool(default_input_name and name == default_input_name),
+            )
+        )
+    return devices
+
+
+def list_output_devices() -> list[AudioDevice]:
+    if importlib.util.find_spec("sounddevice") is None:
+        raise RuntimeError("sounddevice is not installed, so audio devices cannot be listed")
+    import sounddevice as sd
+
+    default_output = _default_output_device_index(sd)
+    default_output_name = _default_output_device_name(sd) if default_output is None else ""
+    devices = []
+    for index, device in enumerate(sd.query_devices()):
+        max_output_channels = int(device.get("max_output_channels", 0))
+        if max_output_channels <= 0:
+            continue
+        name = str(device.get("name", "unknown"))
+        devices.append(
+            AudioDevice(
+                index=index,
+                name=name,
+                max_input_channels=int(device.get("max_input_channels", 0)),
+                max_output_channels=max_output_channels,
+                is_default=index == default_output or bool(default_output_name and name == default_output_name),
             )
         )
     return devices
@@ -167,9 +195,30 @@ def _default_input_device_index(sd) -> int | None:
         return None
 
 
+def _default_output_device_index(sd) -> int | None:
+    try:
+        default = sd.default.device
+        if isinstance(default, (tuple, list)) and len(default) > 1:
+            value = default[1]
+        else:
+            value = default
+        index = None if value is None else int(value)
+        return index if index is not None and index >= 0 else None
+    except Exception:
+        return None
+
+
 def _default_input_device_name(sd) -> str:
     try:
         device = sd.query_devices(kind="input")
+        return str(device.get("name", ""))
+    except Exception:
+        return ""
+
+
+def _default_output_device_name(sd) -> str:
+    try:
+        device = sd.query_devices(kind="output")
         return str(device.get("name", ""))
     except Exception:
         return ""

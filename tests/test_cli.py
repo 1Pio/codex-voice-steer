@@ -81,10 +81,11 @@ def test_voice_test_audio_parses() -> None:
 
 
 def test_audio_devices_parses() -> None:
-    args = build_parser().parse_args(["audio", "devices", "--json"])
+    args = build_parser().parse_args(["audio", "devices", "--json", "--kind", "output"])
     assert args.command == "audio"
     assert args.audio_command == "devices"
     assert args.json is True
+    assert args.kind == "output"
 
 
 def test_audio_record_parses() -> None:
@@ -194,6 +195,17 @@ def test_render_audio_devices_marks_default_and_config_hint() -> None:
     assert "1: Loopback Input (2 input channel(s))" in output
     assert "2: MacBook Pro Microphone (1 input channel(s)) *" in output
     assert "cxv config set audio.device" in output
+
+
+def test_render_output_devices_uses_loopback_hint() -> None:
+    output = _render_audio_devices(
+        [
+            AudioDevice(index=3, name="MacBook Pro Speakers", max_output_channels=2, is_default=True),
+        ],
+        kind="output",
+    )
+    assert "3: MacBook Pro Speakers (2 output channel(s)) *" in output
+    assert "loopback-test --output-device" in output
 
 
 def test_doctor_returns_nonzero_when_any_check_blocks(monkeypatch, tmp_path, capsys) -> None:

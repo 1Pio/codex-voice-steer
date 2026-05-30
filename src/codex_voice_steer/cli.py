@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
-from .audio import input_levels, list_input_devices, play_and_record_input_wav, record_input_wav
+from .audio import input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, record_input_wav
 from .calibration import calibrate_wake
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
@@ -86,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     audio_sub = audio.add_subparsers(dest="audio_command", required=True)
     audio_devices = audio_sub.add_parser("devices", help="List available input devices for audio.device.")
     audio_devices.add_argument("--json", action="store_true", help="Print device list as JSON.")
+    audio_devices.add_argument("--kind", choices=["input", "output", "all"], default="input", help="Device kind to list.")
     audio_record = audio_sub.add_parser("record", help="Record configured input to a 16 kHz mono PCM16 WAV.")
     audio_record.add_argument("wav", help="Output WAV path.")
     audio_record.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
@@ -298,11 +299,11 @@ def _agents_command(args: argparse.Namespace) -> int:
 
 def _audio_command(args: argparse.Namespace, config: Config | None = None) -> int:
     if args.audio_command == "devices":
-        devices = list_input_devices()
+        devices = _audio_devices(str(args.kind))
         if args.json:
             print(json.dumps([device.to_dict() for device in devices], indent=2, sort_keys=True))
         else:
-            print(_render_audio_devices(devices))
+            print(_render_audio_devices(devices, kind=str(args.kind)))
         return 0
     if args.audio_command == "record":
         cfg = config or load_config()
@@ -345,15 +346,40 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
     raise ValueError(f"unknown audio command: {args.audio_command}")
 
 
-def _render_audio_devices(devices) -> str:
-    lines = ["cxv audio input devices"]
+def _audio_devices(kind: str):
+    if kind == "input":
+        return list_input_devices()
+    if kind == "output":
+        return list_output_devices()
+    if kind == "all":
+        seen: dict[int, object] = {}
+        for device in [*list_input_devices(), *list_output_devices()]:
+            seen[device.index] = device
+        return list(seen.values())
+    raise ValueError(f"unknown audio device kind: {kind}")
+
+
+def _render_audio_devices(devices, kind: str = "input") -> str:
+    lines = [f"cxv audio {kind} devices"]
     if not devices:
         lines.append("(none)")
         return "\n".join(lines)
     for device in devices:
         marker = " *" if device.is_default else ""
-        lines.append(f"{device.index}: {device.name} ({device.max_input_channels} input channel(s)){marker}")
-    lines.append("Use one with: cxv config set audio.device <index-or-name>")
+        if kind == "input":
+            capability = f"{device.max_input_channels} input channel(s)"
+        elif kind == "output":
+            capability = f"{device.max_output_channels} output channel(s)"
+        else:
+            capability = f"{device.max_input_channels} input / {device.max_output_channels} output channel(s)"
+        lines.append(f"{device.index}: {device.name} ({capability}){marker}")
+    if kind == "output":
+        lines.append("Use one with: cxv audio loopback-test --output-device <index-or-name> ...")
+    elif kind == "all":
+        lines.append("Use input with: cxv config set audio.device <index-or-name>")
+        lines.append("Use output with: cxv audio loopback-test --output-device <index-or-name> ...")
+    else:
+        lines.append("Use one with: cxv config set audio.device <index-or-name>")
     return "\n".join(lines)
 
 
