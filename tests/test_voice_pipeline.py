@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from codex_voice_steer.config import load_config
+from codex_voice_steer.segment import AudioFrame
+from codex_voice_steer.stt import SttResult
+from codex_voice_steer.voice_pipeline import EndpointCollector, VoicePipeline
+
+
+def frame(samples: int = 1280, value: bytes = b"\1\0") -> AudioFrame:
+    return AudioFrame(pcm16=value * samples, sample_rate=16000, channels=1)
+
+
+class FakeWake:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def predict(self, _pcm16_frame: bytes) -> bool:
+        self.calls += 1
+        return self.calls == 2
+
+
+class FakeVad:
+    def speech_timestamps(self, pcm16: bytes) -> list[dict[str, int]]:
+        samples = len(pcm16) // 2
+        if samples < 3200:
+            return []
+        return [{"start": 0, "end": 3200}]
+
+
+class FakeStt:
+    def transcribe(self, wav_path: Path, timeout_sec: int = 120) -> SttResult:
+        return SttResult(text="check status now", command=["fake", str(wav_path)])
+
+
+def test_endpoint_finalizes_after_final_silence(tmp_path) -> None:
+    config = load_config(path=tmp_path / "missing.toml")
+    endpoint = EndpointCollector(config, FakeVad())
+    assert endpoint.add(frame()) is False
+    for _ in range(13):
+        done = endpoint.add(frame(value=b"\0\0"))
+    assert done is True
+
+
+def test_voice_pipeline_wake_vad_stt_delivery(tmp_path) -> None:
+    config = load_config(path=tmp_path / "missing.toml")
+    delivered: list[str] = []
+    pipeline = VoicePipeline(config, FakeWake(), FakeVad(), FakeStt(), delivered.append, temp_dir=tmp_path)
+    frames = [frame(), frame(), *[frame(value=b"\0\0") for _ in range(14)]]
+    result = pipeline.run_once(frames)
+    assert result.status == "delivered"
+    assert result.wav_path is not None and result.wav_path.exists()
+    assert delivered == ["check status now"]

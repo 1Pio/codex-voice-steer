@@ -16,13 +16,20 @@ class WakeReadiness:
 
 def wake_readiness(config: Config, repo_root: Path | None = None) -> WakeReadiness:
     model_path = Path(str(config.get("wake.model_path", "models/wake/scarlett.onnx")))
-    if not model_path.is_absolute() and repo_root is not None:
-        model_path = repo_root / model_path
+    if not model_path.is_absolute():
+        model_path = (repo_root or _default_repo_root()) / model_path
     if importlib.util.find_spec("openwakeword") is None:
         return WakeReadiness(False, "openwakeword Python package is not installed", model_path)
     if not model_path.exists():
         return WakeReadiness(False, f"custom wake model missing: {model_path}", model_path)
     return WakeReadiness(True, "openwakeword and custom scarlett model are present", model_path)
+
+
+def _default_repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return Path.cwd()
 
 
 class OpenWakeWordDetector:

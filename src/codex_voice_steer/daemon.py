@@ -12,8 +12,13 @@ from typing import Any
 
 from .codex_app_server import CodexAppServer
 from .config import Config, load_config
+from .audio import MicCapture, audio_readiness
 from .paths import expand_path
 from .state import StateStore
+from .stt import MacParakeetStt
+from .vad import SileroVad, vad_readiness
+from .voice_pipeline import VoicePipeline
+from .wake import OpenWakeWordDetector, wake_readiness
 
 
 class CxvDaemon:
@@ -23,6 +28,7 @@ class CxvDaemon:
         self.pid_path = expand_path(str(config.get("server.pid_path")))
         self.state_store = StateStore(expand_path(str(config.get("server.state_db"))))
         self.codex: CodexAppServer | None = None
+        self.listen_task: asyncio.Task[None] | None = None
 
     async def serve(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,10 +75,19 @@ class CxvDaemon:
             state = self.state_store.load()
             return {"ok": True, "running": True, "state": state.to_dict()}
         if command == "listen":
+            blockers = self._listen_blockers()
+            if blockers:
+                self.state_store.update(listening=False)
+                return {"ok": False, "error": "voice runtime is not ready", "blockers": blockers}
             state = self.state_store.update(listening=True)
+            if self.listen_task is None or self.listen_task.done():
+                self.listen_task = asyncio.create_task(self._listen_loop())
             return {"ok": True, "state": state.to_dict()}
         if command == "pause":
             state = self.state_store.update(listening=False)
+            if self.listen_task is not None:
+                self.listen_task.cancel()
+                self.listen_task = None
             return {"ok": True, "state": state.to_dict()}
         if command == "bind":
             state = self.state_store.update(thread_id=request.get("thread_id", ""), cwd=request.get("cwd", "."))
@@ -93,6 +108,41 @@ class CxvDaemon:
             self.codex = CodexAppServer(self.config, self.state_store)
             self.codex.start()
         return self.codex
+
+    def _listen_blockers(self) -> list[str]:
+        checks = [
+            audio_readiness(),
+            vad_readiness(),
+            wake_readiness(self.config),
+        ]
+        return [check.reason for check in checks if not check.ok]
+
+    async def _listen_loop(self) -> None:
+        try:
+            while self.state_store.load().listening:
+                result = await asyncio.to_thread(self._run_voice_turn)
+                self.state_store.append_event(
+                    "voice_turn",
+                    status=result.status,
+                    transcript=result.transcript,
+                    wav_path=str(result.wav_path or ""),
+                    reason=result.reason,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.state_store.append_event("voice_error", error=str(exc))
+            self.state_store.update(listening=False)
+
+    def _run_voice_turn(self):
+        pipeline = VoicePipeline(
+            self.config,
+            wake=OpenWakeWordDetector(self.config),
+            vad=SileroVad(self.config),
+            stt=MacParakeetStt(self.config),
+            deliver_text=lambda text: self._codex().deliver_text(text),
+        )
+        return pipeline.run_once(MicCapture(self.config).frames())
 
 
 async def send_request(config: Config, payload: dict[str, Any]) -> dict[str, Any]:

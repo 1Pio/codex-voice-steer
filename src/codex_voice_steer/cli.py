@@ -106,7 +106,7 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         print(render_models())
         return 0
     if args.command == "doctor":
-        print(render_doctor(run_doctor(config, repo_root=Path.cwd())))
+        print(render_doctor(run_doctor(config)))
         return 0
     if args.command == "agents":
         return _agents_command(args)
