@@ -68,7 +68,11 @@ async def _run_foreground_listener(config: Config, poll_interval: float, max_pol
     polls = 0
     try:
         while True:
-            status = await send_request(config, {"command": "status"})
+            try:
+                status = await send_request(config, {"command": "status"})
+            except Exception as exc:
+                write_ui(config, "daemon_lost", f"daemon lost: {exc}", error=str(exc))
+                return 1
             events = list(status.get("state", {}).get("events", []))
             new_events = _events_after(events, last_seen_ts)
             for event in new_events:

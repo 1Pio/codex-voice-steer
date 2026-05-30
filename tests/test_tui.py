@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import types
 
 from codex_voice_steer.config import load_config
@@ -59,3 +60,27 @@ def test_tui_event_cursor_survives_capped_history() -> None:
     cursor = _last_event_ts(before)
     assert cursor == 199.0
     assert _events_after(after, cursor) == [{"event": "wake_detected", "ts": 200.0}]
+
+
+def test_foreground_listener_handles_daemon_loss(tmp_path, monkeypatch, capsys) -> None:
+    cfg = load_config(overrides={"ui": {"mode": "jsonl"}}, path=tmp_path / "missing.toml")
+    calls = []
+
+    async def fake_ensure_daemon(_config):
+        return None
+
+    async def fake_send_request(_config, payload):
+        calls.append(payload["command"])
+        if calls == ["status"]:
+            return {"ok": True, "state": {"events": []}}
+        if calls == ["status", "listen"]:
+            return {"ok": True}
+        raise FileNotFoundError("daemon socket disappeared")
+
+    monkeypatch.setattr(tui, "ensure_daemon", fake_ensure_daemon)
+    monkeypatch.setattr(tui, "send_request", fake_send_request)
+
+    result = asyncio.run(tui._run_foreground_listener(cfg, poll_interval=0, max_polls=None))
+
+    assert result == 1
+    assert '"event": "daemon_lost"' in capsys.readouterr().out
