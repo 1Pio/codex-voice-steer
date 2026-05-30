@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import sys
+import struct
 import types
 import wave
 
 import pytest
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import MicCapture, audio_readiness, input_levels, list_input_devices, record_input_wav
+from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, record_input_wav
 from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 
@@ -171,6 +172,9 @@ def test_record_input_wav_writes_fixed_duration_capture(tmp_path, monkeypatch) -
     assert result.device == "Loopback Input"
     assert result.rms == pytest.approx(2**0.5)
     assert result.peak == 2
+    assert result.gain_db == 0.0
+    assert result.clipped_samples == 0
+    assert result.clipped_ratio == 0.0
     assert result.to_dict()["rms"] == pytest.approx(2**0.5)
     with wave.open(str(wav_path), "rb") as wav:
         assert wav.getframerate() == 16000
@@ -199,6 +203,16 @@ def test_input_levels_reports_windowed_rms_and_peak(tmp_path, monkeypatch) -> No
     assert levels[0].rms == pytest.approx(2.5**0.5)
     assert levels[0].peak == 2
     assert levels[0].device == "0"
+    assert levels[0].gain_db == 0.0
+    assert levels[0].clipped_samples == 0
+    assert levels[0].clipped_ratio == 0.0
     assert levels[1].elapsed_sec == pytest.approx(0.24)
     assert levels[1].rms == pytest.approx(3)
     assert levels[1].peak == 3
+
+
+def test_apply_gain_pcm16_amplifies_and_reports_clipping() -> None:
+    result = apply_gain_pcm16(struct.pack("<hh", 20000, -20000), 6.020599913279624)
+    assert result["pcm16"] == struct.pack("<hh", 32767, -32768)
+    assert result["clipped_samples"] == 2
+    assert result["clipped_ratio"] == 1.0

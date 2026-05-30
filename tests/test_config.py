@@ -11,6 +11,7 @@ def test_default_config_has_no_version_key() -> None:
     parsed = tomllib.loads(default_config_toml())
     assert "version" not in parsed
     assert parsed["wake"]["word"] == "scarlett"
+    assert parsed["audio"]["input_gain_db"] == 0.0
     assert parsed["stt"]["engine"] == "macparakeet"
     assert parsed["codex"]["permission_profile"] == ":workspace"
     assert "permissions" not in parsed["codex"]

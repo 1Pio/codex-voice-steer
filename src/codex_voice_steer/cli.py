@@ -90,11 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
     audio_record.add_argument("wav", help="Output WAV path.")
     audio_record.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
     audio_record.add_argument("--device", help="Temporary input device override by index or name.")
+    audio_record.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
     audio_record.add_argument("--json", action="store_true", help="Print capture details as JSON.")
     audio_meter = audio_sub.add_parser("meter", help="Print live input RMS/peak levels for the configured device.")
     audio_meter.add_argument("--seconds", type=float, default=5.0, help="Duration to monitor.")
     audio_meter.add_argument("--interval-ms", type=int, default=500, help="Level reporting interval.")
     audio_meter.add_argument("--device", help="Temporary input device override by index or name.")
+    audio_meter.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
     audio_meter.add_argument("--jsonl", action="store_true", help="Print each level sample as JSON Lines.")
 
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
@@ -107,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("wav", help="Output WAV path for the captured calibration sample.")
     calibrate.add_argument("--seconds", type=float, default=5.0, help="Duration to record.")
     calibrate.add_argument("--device", help="Temporary input device override by index or name.")
+    calibrate.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
     calibrate.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this calibration.")
     calibrate.add_argument("--min-rms", type=float, default=1000.0, help="Minimum RMS for a strong enough live proof.")
     calibrate.add_argument("--min-peak", type=int, default=4000, help="Minimum peak amplitude for a strong enough live proof.")
@@ -294,8 +297,7 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
         return 0
     if args.audio_command == "record":
         cfg = config or load_config()
-        if args.device:
-            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        cfg = _audio_override_config(cfg, device=args.device, gain_db=args.gain_db)
         result = record_input_wav(cfg, Path(args.wav), seconds=float(args.seconds))
         if args.json:
             print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
@@ -305,13 +307,15 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
         return 0
     if args.audio_command == "meter":
         cfg = config or load_config()
-        if args.device:
-            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        cfg = _audio_override_config(cfg, device=args.device, gain_db=args.gain_db)
         for level in input_levels(cfg, seconds=float(args.seconds), interval_ms=int(args.interval_ms)):
             if args.jsonl:
                 print(json.dumps(level.to_dict(), sort_keys=True))
             else:
-                print(f"{level.elapsed_sec:5.2f}s  rms={level.rms:8.2f}  peak={level.peak:5d}  device={level.device}")
+                print(
+                    f"{level.elapsed_sec:5.2f}s  rms={level.rms:8.2f}  peak={level.peak:5d}  "
+                    f"clipped={level.clipped_ratio:.3f}  gain={level.gain_db:g}dB  device={level.device}"
+                )
         return 0
     raise ValueError(f"unknown audio command: {args.audio_command}")
 
@@ -338,9 +342,7 @@ def _wake_command(args: argparse.Namespace, config: Config) -> int:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.hit else 1
     if args.wake_command == "calibrate":
-        cfg = config
-        if args.device:
-            cfg = cfg.with_overrides({"audio": {"device": args.device}})
+        cfg = _audio_override_config(config, device=args.device, gain_db=args.gain_db)
         result = calibrate_wake(
             cfg,
             Path(args.wav),
@@ -352,6 +354,15 @@ def _wake_command(args: argparse.Namespace, config: Config) -> int:
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.ok else 1
     raise ValueError(f"unknown wake command: {args.wake_command}")
+
+
+def _audio_override_config(config: Config, device: str | None = None, gain_db: float | None = None) -> Config:
+    audio: dict[str, Any] = {}
+    if device:
+        audio["device"] = device
+    if gain_db is not None:
+        audio["input_gain_db"] = gain_db
+    return config.with_overrides({"audio": audio}) if audio else config
 
 
 def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:

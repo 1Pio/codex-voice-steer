@@ -47,6 +47,8 @@ def test_wake_calibrate_parses() -> None:
             "3",
             "--device",
             "0",
+            "--gain-db",
+            "12",
             "--threshold",
             "0.45",
             "--min-rms",
@@ -60,6 +62,7 @@ def test_wake_calibrate_parses() -> None:
     assert args.wav == "/tmp/scarlett-live.wav"
     assert args.seconds == 3
     assert args.device == "0"
+    assert args.gain_db == 12
     assert args.threshold == 0.45
     assert args.min_rms == 500
     assert args.min_peak == 2000
@@ -81,22 +84,24 @@ def test_audio_devices_parses() -> None:
 
 
 def test_audio_record_parses() -> None:
-    args = build_parser().parse_args(["audio", "record", "/tmp/in.wav", "--seconds", "1.5", "--device", "2", "--json"])
+    args = build_parser().parse_args(["audio", "record", "/tmp/in.wav", "--seconds", "1.5", "--device", "2", "--gain-db", "9", "--json"])
     assert args.command == "audio"
     assert args.audio_command == "record"
     assert args.wav == "/tmp/in.wav"
     assert args.seconds == 1.5
     assert args.device == "2"
+    assert args.gain_db == 9
     assert args.json is True
 
 
 def test_audio_meter_parses() -> None:
-    args = build_parser().parse_args(["audio", "meter", "--seconds", "2", "--interval-ms", "250", "--device", "0", "--jsonl"])
+    args = build_parser().parse_args(["audio", "meter", "--seconds", "2", "--interval-ms", "250", "--device", "0", "--gain-db", "6", "--jsonl"])
     assert args.command == "audio"
     assert args.audio_command == "meter"
     assert args.seconds == 2
     assert args.interval_ms == 250
     assert args.device == "0"
+    assert args.gain_db == 6
     assert args.jsonl is True
 
 

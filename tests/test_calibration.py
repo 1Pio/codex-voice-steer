@@ -66,6 +66,9 @@ def _recording(wav_path: Path | None = None, rms: float = 0.0, peak: int = 0) ->
         device="default",
         rms=rms,
         peak=peak,
+        gain_db=0.0,
+        clipped_samples=0,
+        clipped_ratio=0.0,
     )
 
 

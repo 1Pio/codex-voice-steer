@@ -44,6 +44,9 @@ class AudioRecordResult:
     device: str
     rms: float
     peak: int
+    gain_db: float
+    clipped_samples: int
+    clipped_ratio: float
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +58,9 @@ class AudioRecordResult:
             "device": self.device,
             "rms": self.rms,
             "peak": self.peak,
+            "gain_db": self.gain_db,
+            "clipped_samples": self.clipped_samples,
+            "clipped_ratio": self.clipped_ratio,
         }
 
 
@@ -65,6 +71,9 @@ class AudioLevel:
     peak: int
     samples: int
     device: str
+    gain_db: float
+    clipped_samples: int
+    clipped_ratio: float
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -73,6 +82,9 @@ class AudioLevel:
             "peak": self.peak,
             "samples": self.samples,
             "device": self.device,
+            "gain_db": self.gain_db,
+            "clipped_samples": self.clipped_samples,
+            "clipped_ratio": self.clipped_ratio,
         }
 
 
@@ -173,6 +185,7 @@ class MicCapture:
         self.channels = int(config.get("audio.channels", 1))
         self.device = _device_arg(str(config.get("audio.device", "default")))
         self.blocksize = int(self.sample_rate * chunk_ms / 1000)
+        self.gain_db = float(config.get("audio.input_gain_db", 0.0))
 
     def frames(self) -> Iterator[AudioFrame]:
         import sounddevice as sd
@@ -186,7 +199,7 @@ class MicCapture:
         ) as stream:
             while True:
                 data, _overflowed = stream.read(self.blocksize)
-                yield AudioFrame(pcm16=bytes(data), sample_rate=self.sample_rate, channels=self.channels)
+                yield AudioFrame(pcm16=apply_gain_pcm16(bytes(data), self.gain_db)["pcm16"], sample_rate=self.sample_rate, channels=self.channels)
 
 
 def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRecordResult:
@@ -199,6 +212,8 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
     level_samples = 0
     sum_squares = 0.0
     peak = 0
+    clipped_samples = 0
+    gain_db = float(config.get("audio.input_gain_db", 0.0))
     wav_path.parent.mkdir(parents=True, exist_ok=True)
     capture = MicCapture(config)
     with wave.open(str(wav_path), "wb") as wav:
@@ -215,9 +230,11 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
             level_samples += int(stats["samples"])
             sum_squares += stats["sum_squares"]
             peak = max(peak, int(stats["peak"]))
+            clipped_samples += int(stats["clipped_samples"])
             wav.writeframes(chunk)
             captured_samples += take_samples
     rms = math.sqrt(sum_squares / level_samples) if level_samples else 0.0
+    clipped_ratio = clipped_samples / level_samples if level_samples else 0.0
     return AudioRecordResult(
         wav_path=wav_path,
         sample_rate=sample_rate,
@@ -227,6 +244,9 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
         device=str(config.get("audio.device", "default")),
         rms=rms,
         peak=peak,
+        gain_db=gain_db,
+        clipped_samples=clipped_samples,
+        clipped_ratio=clipped_ratio,
     )
 
 
@@ -244,7 +264,9 @@ def input_levels(config: Config, seconds: float, interval_ms: int = 500) -> Iter
     window_level_samples = 0
     sum_squares = 0.0
     peak = 0
+    clipped_samples = 0
     device = str(config.get("audio.device", "default"))
+    gain_db = float(config.get("audio.input_gain_db", 0.0))
     for frame in MicCapture(config).frames():
         remaining = target_samples - captured_samples
         if remaining <= 0:
@@ -256,34 +278,75 @@ def input_levels(config: Config, seconds: float, interval_ms: int = 500) -> Iter
         window_samples += take_samples
         sum_squares += float(stats["sum_squares"])
         peak = max(peak, int(stats["peak"]))
+        clipped_samples += int(stats["clipped_samples"])
         captured_samples += take_samples
         if window_samples >= interval_samples or captured_samples >= target_samples:
             rms = math.sqrt(sum_squares / window_level_samples) if window_level_samples else 0.0
+            clipped_ratio = clipped_samples / window_level_samples if window_level_samples else 0.0
             yield AudioLevel(
                 elapsed_sec=captured_samples / sample_rate,
                 rms=rms,
                 peak=peak,
                 samples=window_samples,
                 device=device,
+                gain_db=gain_db,
+                clipped_samples=clipped_samples,
+                clipped_ratio=clipped_ratio,
             )
             window_samples = 0
             window_level_samples = 0
             sum_squares = 0.0
             peak = 0
+            clipped_samples = 0
 
 
 def pcm16_level_stats(pcm16: bytes) -> dict[str, float | int]:
     sample_count = 0
     sum_squares = 0.0
     peak = 0
+    clipped_samples = 0
     for (sample,) in struct.iter_unpack("<h", pcm16[: len(pcm16) - (len(pcm16) % 2)]):
         value = int(sample)
         magnitude = abs(value)
         peak = max(peak, magnitude)
+        if value <= -32768 or value >= 32767:
+            clipped_samples += 1
         sum_squares += float(value * value)
         sample_count += 1
     rms = math.sqrt(sum_squares / sample_count) if sample_count else 0.0
-    return {"samples": sample_count, "sum_squares": sum_squares, "rms": rms, "peak": peak}
+    clipped_ratio = clipped_samples / sample_count if sample_count else 0.0
+    return {
+        "samples": sample_count,
+        "sum_squares": sum_squares,
+        "rms": rms,
+        "peak": peak,
+        "clipped_samples": clipped_samples,
+        "clipped_ratio": clipped_ratio,
+    }
+
+
+def apply_gain_pcm16(pcm16: bytes, gain_db: float) -> dict[str, object]:
+    if gain_db == 0:
+        stats = pcm16_level_stats(pcm16)
+        return {"pcm16": pcm16, "clipped_samples": stats["clipped_samples"], "clipped_ratio": stats["clipped_ratio"]}
+    factor = 10 ** (gain_db / 20)
+    output = bytearray()
+    clipped_samples = 0
+    trimmed = pcm16[: len(pcm16) - (len(pcm16) % 2)]
+    for (sample,) in struct.iter_unpack("<h", trimmed):
+        amplified = round(int(sample) * factor)
+        if amplified > 32767:
+            amplified = 32767
+            clipped_samples += 1
+        elif amplified < -32768:
+            amplified = -32768
+            clipped_samples += 1
+        output.extend(struct.pack("<h", amplified))
+    if len(trimmed) < len(pcm16):
+        output.extend(pcm16[len(trimmed) :])
+    sample_count = len(trimmed) // 2
+    clipped_ratio = clipped_samples / sample_count if sample_count else 0.0
+    return {"pcm16": bytes(output), "clipped_samples": clipped_samples, "clipped_ratio": clipped_ratio}
 
 
 def wav_frames(config: Config, wav_path: Path, chunk_ms: int = 80) -> Iterator[AudioFrame]:

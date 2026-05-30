@@ -47,6 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "channels": 1,
         "pre_roll_ms": 750,
         "post_wake_grace_ms": 250,
+        "input_gain_db": 0.0,
     },
     "wake": {
         "enabled": True,
