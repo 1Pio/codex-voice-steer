@@ -60,7 +60,7 @@ def wake_readiness(config: Config, repo_root: Path | None = None) -> WakeReadine
     try:
         from openwakeword.model import Model
 
-        Model(wakeword_models=[str(model_path)])
+        Model(wakeword_models=[str(model_path)], **_openwakeword_feature_kwargs())
     except Exception as exc:
         return WakeReadiness(False, f"custom wake model failed to load: {exc}", model_path)
     return WakeReadiness(True, "openwakeword and custom scarlett model are present", model_path)
@@ -86,7 +86,7 @@ class OpenWakeWordDetector:
 
         self.word = str(config.get("wake.word", "scarlett"))
         self.sensitivity = float(config.get("wake.sensitivity", 0.5))
-        self.model = Model(wakeword_models=[str(readiness.model_path)])
+        self.model = Model(wakeword_models=[str(readiness.model_path)], **_openwakeword_feature_kwargs())
 
     def predict(self, pcm16_frame) -> bool:
         score = self.score(pcm16_frame)
@@ -99,6 +99,22 @@ class OpenWakeWordDetector:
             pcm16_frame = np.frombuffer(pcm16_frame, dtype=np.int16)
         scores = self.model.predict(pcm16_frame)
         return float(scores.get(self.word, 0.0))
+
+
+def _openwakeword_feature_kwargs() -> dict[str, str]:
+    melspec = _packaged_openwakeword_model_path("melspectrogram.onnx")
+    embedding = _packaged_openwakeword_model_path("embedding_model.onnx")
+    if melspec.exists() and embedding.exists():
+        return {
+            "inference_framework": "onnx",
+            "melspec_model_path": str(melspec),
+            "embedding_model_path": str(embedding),
+        }
+    return {}
+
+
+def _packaged_openwakeword_model_path(name: str) -> Path:
+    return Path(__file__).resolve().parent / "resources" / "openwakeword" / "models" / name
 
 
 def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = None) -> WakeAudioTest:

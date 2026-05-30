@@ -7,7 +7,7 @@ from importlib.machinery import ModuleSpec
 
 from codex_voice_steer.config import load_config
 from codex_voice_steer import wake
-from codex_voice_steer.wake import OpenWakeWordDetector, score_wake_audio, wake_readiness
+from codex_voice_steer.wake import OpenWakeWordDetector, _openwakeword_feature_kwargs, score_wake_audio, wake_readiness
 
 
 def test_wake_readiness_rejects_unloadable_model(tmp_path, monkeypatch) -> None:
@@ -49,8 +49,8 @@ def test_wake_detector_converts_pcm_bytes_to_int16_array(tmp_path, monkeypatch) 
     seen = {}
 
     class Model:
-        def __init__(self, wakeword_models):
-            pass
+        def __init__(self, wakeword_models, **kwargs):
+            seen["kwargs"] = kwargs
 
         def predict(self, frame):
             seen["type"] = type(frame).__name__
@@ -64,7 +64,12 @@ def test_wake_detector_converts_pcm_bytes_to_int16_array(tmp_path, monkeypatch) 
 
     detector = OpenWakeWordDetector(load_config(path=cfg_path), repo_root=tmp_path)
     assert detector.predict(b"\x01\x00\x02\x00") is True
-    assert seen == {"type": "ndarray", "dtype": "int16", "shape": (2,)}
+    assert seen["type"] == "ndarray"
+    assert seen["dtype"] == "int16"
+    assert seen["shape"] == (2,)
+    assert seen["kwargs"]["inference_framework"] == "onnx"
+    assert seen["kwargs"]["melspec_model_path"].endswith("melspectrogram.onnx")
+    assert seen["kwargs"]["embedding_model_path"].endswith("embedding_model.onnx")
 
 
 def test_wake_readiness_falls_back_to_packaged_model(tmp_path, monkeypatch) -> None:
@@ -80,7 +85,7 @@ def test_wake_readiness_falls_back_to_packaged_model(tmp_path, monkeypatch) -> N
     model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
 
     class Model:
-        def __init__(self, wakeword_models):
+        def __init__(self, wakeword_models, **_kwargs):
             assert wakeword_models == [str(packaged)]
 
     model_module.Model = Model
@@ -115,7 +120,7 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
     class Model:
         calls = 0
 
-        def __init__(self, wakeword_models):
+        def __init__(self, wakeword_models, **_kwargs):
             pass
 
         def predict(self, frame):
@@ -134,3 +139,10 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
     assert result.rms > 0
     assert result.peak == 1
     assert result.to_dict()["max_score_time_sec"] == 0.08
+
+
+def test_openwakeword_feature_kwargs_use_packaged_onnx_resources() -> None:
+    kwargs = _openwakeword_feature_kwargs()
+    assert kwargs["inference_framework"] == "onnx"
+    assert kwargs["melspec_model_path"].endswith("melspectrogram.onnx")
+    assert kwargs["embedding_model_path"].endswith("embedding_model.onnx")
