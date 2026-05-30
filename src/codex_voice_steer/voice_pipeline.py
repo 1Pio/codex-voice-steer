@@ -42,12 +42,15 @@ class EndpointCollector:
         self.final_silence_samples = int(self.sample_rate * int(config.get("vad.final_silence_ms", 900)) / 1000)
         self.force_final_samples = int(self.sample_rate * int(config.get("vad.force_final_silence_ms", 3000)) / 1000)
         self.max_samples = int(self.sample_rate * int(config.get("vad.max_utterance_sec", 45)))
+        self.post_wake_grace_samples = int(self.sample_rate * int(config.get("audio.post_wake_grace_ms", 250)) / 1000)
 
     def add(self, frame: AudioFrame) -> bool:
         self.frames.append(frame)
         total_samples = sum(item.samples for item in self.frames)
         pcm = b"".join(item.pcm16 for item in self.frames)
         speech = self.vad.speech_timestamps(pcm)
+        if total_samples < self.post_wake_grace_samples:
+            return False
         if not speech:
             return total_samples >= self.force_final_samples
         speech_samples = sum(int(item["end"]) - int(item["start"]) for item in speech)

@@ -264,8 +264,12 @@ class CodexAppServer:
     def _text_input(self, text: str, config: Config | None = None) -> dict[str, str]:
         config = config or self.config
         if config.get("delivery.include_voice_metadata", True):
-            wake = config.get("wake.word", "scarlett")
-            text = f"[cxv voice/text input; wake={wake}]\n{text}"
+            fields = ["cxv voice/text input"]
+            if config.get("delivery.include_wake_word", True):
+                fields.append(f"wake={config.get('wake.word', 'scarlett')}")
+            if config.get("delivery.include_stt_diagnostics", False):
+                fields.append(f"stt={config.get('stt.engine', 'macparakeet')} mode={config.get('stt.mode', 'clean')}")
+            text = f"[{'; '.join(fields)}]\n{text}"
         return {"type": "text", "text": text}
 
     def _developer_instructions(self, config: Config | None = None) -> str:

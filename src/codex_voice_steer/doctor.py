@@ -20,9 +20,15 @@ class Check:
 
 def run_doctor(config: Config, repo_root: Path | None = None) -> list[Check]:
     checks: list[Check] = []
-    checks.append(Check("codex", shutil.which("codex") is not None, shutil.which("codex") or "codex not on PATH"))
-    checks.append(Check("macparakeet", shutil.which(str(config.get("stt.macparakeet.command", "macparakeet-cli"))) is not None, shutil.which(str(config.get("stt.macparakeet.command", "macparakeet-cli"))) or "macparakeet-cli not on PATH"))
-    checks.append(Check("msd optional", True, shutil.which("msd") or "msd not on PATH; optional only"))
+    codex_path = shutil.which("codex")
+    macparakeet_command = str(config.get("stt.macparakeet.command", "macparakeet-cli"))
+    macparakeet_path = shutil.which(macparakeet_command)
+    checks.append(Check("codex", codex_path is not None, codex_path or "codex not on PATH"))
+    checks.append(Check("macparakeet", macparakeet_path is not None, macparakeet_path or "macparakeet-cli not on PATH"))
+    msd_path = shutil.which("msd")
+    msd_required = bool(config.get("instructions.msd.enabled", False)) and bool(config.get("instructions.msd.require_msd_on_path", False))
+    msd_detail = msd_path or ("msd not on PATH; required by config" if msd_required else "msd not on PATH; optional only")
+    checks.append(Check("msd required" if msd_required else "msd optional", msd_path is not None if msd_required else True, msd_detail))
     audio = audio_readiness(config, probe_stream=True)
     checks.append(Check("microphone adapter", audio.ok, audio.reason))
     vad = vad_readiness()

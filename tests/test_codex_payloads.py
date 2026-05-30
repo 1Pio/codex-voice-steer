@@ -81,6 +81,28 @@ def test_text_input_contains_voice_metadata(tmp_path) -> None:
     assert "check status" in payload["text"]
 
 
+def test_text_input_honors_voice_metadata_toggles(tmp_path) -> None:
+    cfg = load_config(
+        overrides={
+            "delivery": {
+                "include_wake_word": False,
+                "include_stt_diagnostics": True,
+            }
+        },
+        path=tmp_path / "missing.toml",
+    )
+    bridge = CodexAppServer(cfg)
+    payload = bridge._text_input("check status")
+    assert "wake=" not in payload["text"]
+    assert "stt=macparakeet mode=clean" in payload["text"]
+
+
+def test_text_input_can_disable_voice_metadata(tmp_path) -> None:
+    cfg = load_config(overrides={"delivery": {"include_voice_metadata": False}}, path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    assert bridge._text_input("check status")["text"] == "check status"
+
+
 def test_turn_started_notification_does_not_clear_active_turn_when_id_missing(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     store = StateStore(tmp_path / "state.json")

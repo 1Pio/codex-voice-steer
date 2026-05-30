@@ -29,6 +29,12 @@ class FakeVad:
         return [{"start": 0, "end": 3200}]
 
 
+class EarlySpeechVad:
+    def speech_timestamps(self, pcm16: bytes) -> list[dict[str, int]]:
+        samples = len(pcm16) // 2
+        return [{"start": 0, "end": min(samples, 3200)}]
+
+
 class FakeStt:
     def transcribe(self, wav_path: Path, timeout_sec: int = 120) -> SttResult:
         return SttResult(text="check status now", command=["fake", str(wav_path)])
@@ -62,3 +68,18 @@ def test_voice_pipeline_wake_vad_stt_delivery(tmp_path) -> None:
     assert result.wav_path is not None and result.wav_path.exists()
     assert delivered == ["check status now"]
     assert [event for event, _fields in events] == ["wake_detected", "vad_final", "stt_final"]
+
+
+def test_endpoint_honors_post_wake_grace_before_finalizing(tmp_path) -> None:
+    config = load_config(
+        overrides={
+            "audio": {"post_wake_grace_ms": 250},
+            "vad": {"min_speech_ms": 80, "final_silence_ms": 80},
+        },
+        path=tmp_path / "missing.toml",
+    )
+    endpoint = EndpointCollector(config, EarlySpeechVad())
+    assert endpoint.add(frame()) is False
+    assert endpoint.add(frame(value=b"\0\0")) is False
+    assert endpoint.add(frame(value=b"\0\0")) is False
+    assert endpoint.add(frame(value=b"\0\0")) is True
