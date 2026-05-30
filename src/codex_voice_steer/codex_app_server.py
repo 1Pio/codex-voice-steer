@@ -117,27 +117,40 @@ class CodexAppServer:
 
     def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
         if method == "turn/started":
-            turn_id = str(params.get("turnId", ""))
-            self.state_store.update(active_turn_id=turn_id)
+            turn_id = self._id_param(params, "turnId", "turn")
+            if turn_id:
+                self.state_store.update(active_turn_id=turn_id)
             self.state_store.append_event("turn_started", turn_id=turn_id)
         elif method == "agentMessage/delta":
             self.state_store.append_event(
                 "codex_visible_delta",
-                thread_id=str(params.get("threadId", "")),
-                turn_id=str(params.get("turnId", "")),
+                thread_id=self._id_param(params, "threadId", "thread"),
+                turn_id=self._id_param(params, "turnId", "turn"),
                 delta=str(params.get("delta", "")),
             )
         elif method == "turn/completed":
+            state = self.state_store.load()
+            turn_id = self._id_param(params, "turnId", "turn") or state.active_turn_id
             self.state_store.append_event(
                 "turn_completed",
-                thread_id=str(params.get("threadId", "")),
-                turn_id=str(params.get("turnId", "")),
+                thread_id=self._id_param(params, "threadId", "thread"),
+                turn_id=turn_id,
             )
             state = self.state_store.update(active_turn_id="")
             if state.queued_inputs:
                 queued = state.queued_inputs.pop(0)
                 self.state_store.save(state)
                 self.deliver_text(queued)
+
+    @staticmethod
+    def _id_param(params: dict[str, Any], key: str, nested_key: str) -> str:
+        value = params.get(key)
+        if value:
+            return str(value)
+        nested = params.get(nested_key)
+        if isinstance(nested, dict) and nested.get("id"):
+            return str(nested["id"])
+        return ""
 
     def ensure_thread(self) -> str:
         state = self.state_store.load()
