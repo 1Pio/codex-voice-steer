@@ -77,7 +77,7 @@ class OpenWakeWordDetector:
         from openwakeword.model import Model
 
         self.word = str(config.get("wake.word", "scarlett"))
-        self.sensitivity = float(config.get("wake.sensitivity", 0.55))
+        self.sensitivity = float(config.get("wake.sensitivity", 0.5))
         self.model = Model(wakeword_models=[str(readiness.model_path)])
 
     def predict(self, pcm16_frame) -> bool:

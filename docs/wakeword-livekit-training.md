@@ -47,6 +47,7 @@ The exported model is not accepted just because the file exists. It must pass:
 ```bash
 python tools/verify_wake_model.py models/wake/scarlett.onnx
 cxv wake test-audio /private/tmp/cxv-livekit-wakeword-output/scarlett/positive_test/clip_000000_r0.wav
+! cxv wake test-audio /private/tmp/cxv-livekit-wakeword-output/scarlett/negative_test/clip_000000_r0.wav
 cxv doctor
 cxv listen
 ```

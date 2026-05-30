@@ -52,7 +52,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "engine": "openwakeword",
         "word": "scarlett",
-        "sensitivity": 0.55,
+        "sensitivity": 0.5,
         "refractory_ms": 1200,
         "allow_barge_in": True,
         "model_path": "models/wake/scarlett.onnx",

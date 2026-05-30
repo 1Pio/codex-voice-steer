@@ -12,10 +12,11 @@ Current receipt:
 - V1 runtime still uses OpenWakeWord. LiveKit is external training/evaluation tooling only.
 - The model is also packaged under `codex_voice_steer/resources/wake/scarlett.onnx` so an installed PATH `cxv` can load it outside the repo.
 - `cxv wake test-audio` verifies controlled 16 kHz mono PCM16 WAV fixtures through the same OpenWakeWord adapter.
-- Current direct fixture smoke: positive generated Scarlett clip hit true at max score 0.644560 with threshold 0.55; negative generated clip hit false at max score 0.020178.
+- Current LiveKit eval after rerunning with fixed background/RIR paths: FPPH 0.0, recall 0.99, accuracy 0.995, threshold 0.5, optimal threshold 0.07, optimal recall 1.0, optimal FPPH 0.1681, validation hours 17.85.
+- Current direct fixture smoke with default `wake.sensitivity = 0.5`: positive fixture max 0.5364097356796265 hit true; negative fixture max 0.010954856872558594 hit false.
 - `cxv doctor` passes with the packaged Scarlett model in the installed tool environment.
 
-The first successful LiveKit run is useful but caveated: it skipped standalone background/RIR augmentation because LiveKit defaulted those paths relative to `./data`. `tools/livekit-wakeword/scarlett.yaml` now pins `/private/tmp/cxv-livekit-wakeword-data/backgrounds` and `/private/tmp/cxv-livekit-wakeword-data/rirs`; rerun train/eval with those paths before treating wake reliability as fully accepted.
+Earlier training skipped standalone background/RIR augmentation because LiveKit defaulted those paths relative to `./data`. `tools/livekit-wakeword/scarlett.yaml` now pins `/private/tmp/cxv-livekit-wakeword-data/backgrounds` and `/private/tmp/cxv-livekit-wakeword-data/rirs`; the current model was exported after that corrected rerun.
 
 Historical local openWakeWord training blocker:
 
