@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -32,6 +33,7 @@ class CxvDaemon:
         self.listen_overrides: dict[str, Any] = {}
         self.live_wake: OpenWakeWordDetector | None = None
         self.live_wake_key: tuple[object, ...] | None = None
+        self.last_activity_monotonic = time.monotonic()
 
     async def serve(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,12 +49,19 @@ class CxvDaemon:
                 loop.add_signal_handler(sig, stop_event.set)
             except NotImplementedError:
                 pass
+        idle_task: asyncio.Task[None] | None = None
+        if self._idle_timeout_sec() > 0:
+            idle_task = asyncio.create_task(self._idle_monitor(stop_event))
         try:
             async with server:
                 await stop_event.wait()
                 server.close()
                 await server.wait_closed()
         finally:
+            if idle_task is not None:
+                idle_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await idle_task
             if self.socket_path.exists():
                 self.socket_path.unlink()
             if self.pid_path.exists() and self.pid_path.read_text().strip() == str(os.getpid()):
@@ -73,6 +82,7 @@ class CxvDaemon:
         await writer.wait_closed()
 
     async def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.last_activity_monotonic = time.monotonic()
         command = request.get("command")
         if command == "status":
             state = self.state_store.load()
@@ -121,6 +131,30 @@ class CxvDaemon:
             asyncio.get_running_loop().call_soon(asyncio.get_running_loop().stop)
             return {"ok": True}
         raise ValueError(f"unknown daemon command: {command}")
+
+    async def _idle_monitor(self, stop_event: asyncio.Event, poll_interval: float = 5.0) -> None:
+        while not stop_event.is_set():
+            timeout = self._idle_timeout_sec()
+            if timeout <= 0:
+                return
+            if self._should_exit_for_idle(time.monotonic()):
+                self.state_store.append_event("daemon_idle_timeout", idle_timeout_minutes=float(self.config.get("server.idle_timeout_minutes", 0)))
+                stop_event.set()
+                return
+            await asyncio.sleep(min(poll_interval, timeout))
+
+    def _idle_timeout_sec(self) -> float:
+        return max(0.0, float(self.config.get("server.idle_timeout_minutes", 0)) * 60.0)
+
+    def _should_exit_for_idle(self, now: float) -> bool:
+        timeout = self._idle_timeout_sec()
+        if timeout <= 0:
+            return False
+        state = self.state_store.load()
+        if state.listening or state.active_turn_id or state.queued_inputs:
+            self.last_activity_monotonic = now
+            return False
+        return now - self.last_activity_monotonic >= timeout
 
     def _codex(self) -> CodexAppServer:
         if self.codex is None:
