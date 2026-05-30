@@ -98,6 +98,35 @@ def test_audio_record_parses() -> None:
     assert args.json is True
 
 
+def test_audio_loopback_test_parses() -> None:
+    args = build_parser().parse_args(
+        [
+            "audio",
+            "loopback-test",
+            "/tmp/source.wav",
+            "/tmp/captured.wav",
+            "--seconds",
+            "1.5",
+            "--device",
+            "2",
+            "--output-device",
+            "3",
+            "--gain-db",
+            "6",
+            "--json",
+        ]
+    )
+    assert args.command == "audio"
+    assert args.audio_command == "loopback-test"
+    assert args.source_wav == "/tmp/source.wav"
+    assert args.captured_wav == "/tmp/captured.wav"
+    assert args.seconds == 1.5
+    assert args.device == "2"
+    assert args.output_device == "3"
+    assert args.gain_db == 6
+    assert args.json is True
+
+
 def test_audio_meter_parses() -> None:
     args = build_parser().parse_args(["audio", "meter", "--seconds", "2", "--interval-ms", "250", "--device", "0", "--gain-db", "6", "--jsonl"])
     assert args.command == "audio"

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents import install_agent, list_agents, print_agent
-from .audio import input_levels, list_input_devices, record_input_wav
+from .audio import input_levels, list_input_devices, play_and_record_input_wav, record_input_wav
 from .calibration import calibrate_wake
 from .config import Config, load_config, set_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
@@ -92,6 +92,14 @@ def build_parser() -> argparse.ArgumentParser:
     audio_record.add_argument("--device", help="Temporary input device override by index or name.")
     audio_record.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
     audio_record.add_argument("--json", action="store_true", help="Print capture details as JSON.")
+    audio_loopback = audio_sub.add_parser("loopback-test", help="Play a WAV while recording the configured input for loopback verification.")
+    audio_loopback.add_argument("source_wav", help="16 kHz mono PCM16 WAV to play to the output device.")
+    audio_loopback.add_argument("captured_wav", help="Output WAV captured from the configured input.")
+    audio_loopback.add_argument("--seconds", type=float, help="Override capture/play duration; defaults to source length.")
+    audio_loopback.add_argument("--device", help="Temporary input device override by index or name.")
+    audio_loopback.add_argument("--output-device", default="default", help="Temporary output device override by index or name.")
+    audio_loopback.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
+    audio_loopback.add_argument("--json", action="store_true", help="Print loopback capture details as JSON.")
     audio_meter = audio_sub.add_parser("meter", help="Print live input RMS/peak levels for the configured device.")
     audio_meter.add_argument("--seconds", type=float, default=5.0, help="Duration to monitor.")
     audio_meter.add_argument("--interval-ms", type=int, default=500, help="Level reporting interval.")
@@ -305,6 +313,22 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
         else:
             print(f"recorded {result.seconds:.2f}s from {result.device}: {result.wav_path}")
             print("Verify with: cxv wake test-audio " + str(result.wav_path))
+        return 0
+    if args.audio_command == "loopback-test":
+        cfg = config or load_config()
+        cfg = _audio_override_config(cfg, device=args.device, gain_db=args.gain_db)
+        result = play_and_record_input_wav(
+            cfg,
+            Path(args.source_wav),
+            Path(args.captured_wav),
+            seconds=args.seconds,
+            output_device=str(args.output_device),
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(f"played {result.source_wav_path} to output {result.output_device}; captured {result.seconds:.2f}s from {result.device}: {result.wav_path}")
+            print("Verify route with: cxv wake test-audio " + str(result.wav_path))
         return 0
     if args.audio_command == "meter":
         cfg = config or load_config()

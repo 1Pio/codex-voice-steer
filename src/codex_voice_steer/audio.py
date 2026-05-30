@@ -65,6 +65,18 @@ class AudioRecordResult:
 
 
 @dataclass(frozen=True)
+class AudioLoopbackResult(AudioRecordResult):
+    source_wav_path: Path = Path()
+    output_device: str = "default"
+
+    def to_dict(self) -> dict[str, object]:
+        data = super().to_dict()
+        data["source_wav_path"] = str(self.source_wav_path)
+        data["output_device"] = self.output_device
+        return data
+
+
+@dataclass(frozen=True)
 class AudioLevel:
     elapsed_sec: float
     rms: float
@@ -247,6 +259,93 @@ def record_input_wav(config: Config, wav_path: Path, seconds: float) -> AudioRec
         gain_db=gain_db,
         clipped_samples=clipped_samples,
         clipped_ratio=clipped_ratio,
+    )
+
+
+def play_and_record_input_wav(
+    config: Config,
+    source_wav_path: Path,
+    captured_wav_path: Path,
+    seconds: float | None = None,
+    output_device: str = "default",
+) -> AudioLoopbackResult:
+    sample_rate = int(config.get("audio.sample_rate", 16000))
+    channels = int(config.get("audio.channels", 1))
+    blocksize = int(sample_rate * 80 / 1000)
+    gain_db = float(config.get("audio.input_gain_db", 0.0))
+    input_device = _device_arg(str(config.get("audio.device", "default")))
+    output_device_arg = _device_arg(output_device)
+
+    with wave.open(str(source_wav_path), "rb") as source:
+        if source.getnchannels() != channels or source.getsampwidth() != 2 or source.getframerate() != sample_rate:
+            raise ValueError(
+                "loopback source audio must be 16 kHz mono PCM16 WAV "
+                f"(got {source.getframerate()} Hz, {source.getnchannels()} channel(s), {source.getsampwidth() * 8}-bit)"
+            )
+        source_samples = source.getnframes()
+        target_samples = int(sample_rate * (seconds if seconds is not None else source_samples / sample_rate))
+        if target_samples <= 0:
+            raise ValueError("loopback duration must be greater than zero")
+
+        import sounddevice as sd
+
+        captured_wav_path.parent.mkdir(parents=True, exist_ok=True)
+        captured_samples = 0
+        level_samples = 0
+        sum_squares = 0.0
+        peak = 0
+        clipped_samples = 0
+        with sd.RawInputStream(
+            samplerate=sample_rate,
+            blocksize=blocksize,
+            device=input_device,
+            channels=channels,
+            dtype="int16",
+        ) as input_stream, sd.RawOutputStream(
+            samplerate=sample_rate,
+            blocksize=blocksize,
+            device=output_device_arg,
+            channels=channels,
+            dtype="int16",
+        ) as output_stream, wave.open(str(captured_wav_path), "wb") as captured:
+            captured.setnchannels(channels)
+            captured.setsampwidth(2)
+            captured.setframerate(sample_rate)
+            while captured_samples < target_samples:
+                remaining = target_samples - captured_samples
+                take_samples = min(blocksize, remaining)
+                playback = source.readframes(take_samples)
+                expected_bytes = take_samples * channels * 2
+                if len(playback) < expected_bytes:
+                    playback += b"\0" * (expected_bytes - len(playback))
+                output_stream.write(playback)
+                data, _overflowed = input_stream.read(take_samples)
+                gained = apply_gain_pcm16(bytes(data), gain_db)
+                chunk = gained["pcm16"]
+                assert isinstance(chunk, bytes)
+                stats = pcm16_level_stats(chunk)
+                level_samples += int(stats["samples"])
+                sum_squares += float(stats["sum_squares"])
+                peak = max(peak, int(stats["peak"]))
+                clipped_samples += int(gained["clipped_samples"])
+                captured.writeframes(chunk)
+                captured_samples += take_samples
+    rms = math.sqrt(sum_squares / level_samples) if level_samples else 0.0
+    clipped_ratio = clipped_samples / level_samples if level_samples else 0.0
+    return AudioLoopbackResult(
+        wav_path=captured_wav_path,
+        sample_rate=sample_rate,
+        channels=channels,
+        samples=captured_samples,
+        seconds=captured_samples / sample_rate,
+        device=str(config.get("audio.device", "default")),
+        rms=rms,
+        peak=peak,
+        gain_db=gain_db,
+        clipped_samples=clipped_samples,
+        clipped_ratio=clipped_ratio,
+        source_wav_path=source_wav_path,
+        output_device=output_device,
     )
 
 
