@@ -20,3 +20,9 @@ def test_bind_parses_thread_and_cwd() -> None:
     args = build_parser().parse_args(["bind", "--thread", "thr_123", "--cwd", "/tmp"])
     assert args.thread == "thr_123"
     assert args.cwd == "/tmp"
+
+
+def test_wake_training_status_parses() -> None:
+    args = build_parser().parse_args(["wake", "training-status"])
+    assert args.command == "wake"
+    assert args.wake_command == "training-status"

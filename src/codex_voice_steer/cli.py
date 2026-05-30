@@ -15,6 +15,7 @@ from .daemon import ensure_daemon, is_running, run_serve, send_request, start_ba
 from .doctor import render_doctor, run_doctor
 from .models import render_models
 from .tui import run_foreground_tui
+from .wake_training import render_wake_training_checks, wake_training_checks
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,6 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("models", help="List built-in compatible STT models.")
     sub.add_parser("doctor", help="Check local cxv dependencies and blockers.")
 
+    wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
+    wake_sub = wake.add_subparsers(dest="wake_command", required=True)
+    wake_sub.add_parser("training-status", help="Check local Scarlett wake-model training prerequisites.")
+
     agents = sub.add_parser("agents", help="List, install, or print bundled Codex agents.")
     agents_sub = agents.add_subparsers(dest="agents_command", required=True)
     agents_sub.add_parser("list")
@@ -108,6 +113,8 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
     if args.command == "doctor":
         print(render_doctor(run_doctor(config)))
         return 0
+    if args.command == "wake":
+        return _wake_command(args)
     if args.command == "agents":
         return _agents_command(args)
     raise ValueError(f"unknown command: {args.command}")
@@ -177,6 +184,14 @@ def _agents_command(args: argparse.Namespace) -> int:
         print("Select it with: cxv config set codex.agent " + ("cxv-voice-msd" if args.kind == "msd" else "cxv-voice-slim"))
         return 0
     raise ValueError(f"unknown agents command: {args.agents_command}")
+
+
+def _wake_command(args: argparse.Namespace) -> int:
+    if args.wake_command == "training-status":
+        checks = wake_training_checks()
+        print(render_wake_training_checks(checks))
+        return 0 if all(check.ok for check in checks) else 1
+    raise ValueError(f"unknown wake command: {args.wake_command}")
 
 
 def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
