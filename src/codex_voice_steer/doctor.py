@@ -23,7 +23,7 @@ def run_doctor(config: Config, repo_root: Path | None = None) -> list[Check]:
     checks.append(Check("codex", shutil.which("codex") is not None, shutil.which("codex") or "codex not on PATH"))
     checks.append(Check("macparakeet", shutil.which(str(config.get("stt.macparakeet.command", "macparakeet-cli"))) is not None, shutil.which(str(config.get("stt.macparakeet.command", "macparakeet-cli"))) or "macparakeet-cli not on PATH"))
     checks.append(Check("msd optional", True, shutil.which("msd") or "msd not on PATH; optional only"))
-    audio = audio_readiness()
+    audio = audio_readiness(config)
     checks.append(Check("microphone adapter", audio.ok, audio.reason))
     vad = vad_readiness()
     checks.append(Check("silero vad", vad.ok, vad.reason))

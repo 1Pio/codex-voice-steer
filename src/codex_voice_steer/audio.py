@@ -16,16 +16,29 @@ class AudioReadiness:
     reason: str
 
 
-def audio_readiness() -> AudioReadiness:
+def audio_readiness(config: Config | None = None) -> AudioReadiness:
     if importlib.util.find_spec("sounddevice") is None:
         return AudioReadiness(False, "sounddevice is not installed, so microphone capture is unavailable")
+    configured = str(config.get("audio.device", "default")) if config is not None else "default"
+    device_arg = _device_arg(configured)
     try:
         import sounddevice as sd
 
-        device = sd.query_devices(kind="input")
+        device = sd.query_devices(device=device_arg, kind="input") if device_arg is not None else sd.query_devices(kind="input")
     except Exception as exc:
-        return AudioReadiness(False, f"default microphone input is unavailable: {exc}")
-    return AudioReadiness(True, f"default microphone input available: {device.get('name', 'unknown')}")
+        label = "default" if device_arg is None else configured
+        return AudioReadiness(False, f"microphone input {label!r} is unavailable: {exc}")
+    label = "default" if device_arg is None else configured
+    return AudioReadiness(True, f"microphone input {label!r} available: {device.get('name', 'unknown')}")
+
+
+def _device_arg(configured: str):
+    if configured == "default":
+        return None
+    try:
+        return int(configured)
+    except ValueError:
+        return configured
 
 
 class MicCapture:

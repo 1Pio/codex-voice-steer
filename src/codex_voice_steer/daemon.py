@@ -128,7 +128,7 @@ class CxvDaemon:
 
     def _listen_blockers(self) -> list[str]:
         checks = [
-            audio_readiness(),
+            audio_readiness(self.config),
             vad_readiness(),
             wake_readiness(self.config),
         ]
