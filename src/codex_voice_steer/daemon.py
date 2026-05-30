@@ -137,6 +137,7 @@ def start_background(config: Config) -> int:
 
 def stop_background(config: Config) -> bool:
     if not is_running(config):
+        StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
         return False
     pid_path = expand_path(str(config.get("server.pid_path")))
     pid = int(pid_path.read_text().strip())
@@ -144,9 +145,11 @@ def stop_background(config: Config) -> bool:
     deadline = time.time() + 5
     while time.time() < deadline:
         if not is_running(config):
+            StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
             return True
         time.sleep(0.1)
     os.kill(pid, signal.SIGKILL)
+    StateStore(expand_path(str(config.get("server.state_db")))).update(active_turn_id="", listening=False)
     return True
 
 

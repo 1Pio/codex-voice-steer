@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ class CxvState:
     active_turn_id: str = ""
     listening: bool = False
     queued_inputs: list[str] | None = None
+    events: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -25,6 +27,7 @@ class CxvState:
             "active_turn_id": self.active_turn_id,
             "listening": self.listening,
             "queued_inputs": self.queued_inputs or [],
+            "events": self.events or [],
         }
 
     @classmethod
@@ -36,6 +39,7 @@ class CxvState:
             active_turn_id=str(data.get("active_turn_id", "")),
             listening=bool(data.get("listening", False)),
             queued_inputs=list(data.get("queued_inputs", [])),
+            events=list(data.get("events", [])),
         )
 
 
@@ -56,5 +60,13 @@ class StateStore:
         state = self.load()
         for key, value in kwargs.items():
             setattr(state, key, value)
+        self.save(state)
+        return state
+
+    def append_event(self, event: str, **fields: Any) -> CxvState:
+        state = self.load()
+        events = state.events or []
+        events.append({"ts": time.time(), "event": event, **fields})
+        state.events = events[-200:]
         self.save(state)
         return state

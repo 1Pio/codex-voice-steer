@@ -117,8 +117,22 @@ class CodexAppServer:
 
     def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
         if method == "turn/started":
-            self.state_store.update(active_turn_id=str(params.get("turnId", "")))
+            turn_id = str(params.get("turnId", ""))
+            self.state_store.update(active_turn_id=turn_id)
+            self.state_store.append_event("turn_started", turn_id=turn_id)
+        elif method == "agentMessage/delta":
+            self.state_store.append_event(
+                "codex_visible_delta",
+                thread_id=str(params.get("threadId", "")),
+                turn_id=str(params.get("turnId", "")),
+                delta=str(params.get("delta", "")),
+            )
         elif method == "turn/completed":
+            self.state_store.append_event(
+                "turn_completed",
+                thread_id=str(params.get("threadId", "")),
+                turn_id=str(params.get("turnId", "")),
+            )
             state = self.state_store.update(active_turn_id="")
             if state.queued_inputs:
                 queued = state.queued_inputs.pop(0)
@@ -148,6 +162,7 @@ class CodexAppServer:
     def deliver_text(self, text: str, force_steer: bool = False) -> DeliveryResult:
         state = self.state_store.load()
         thread_id = self.ensure_thread()
+        self.state_store.append_event("user_final", text=text, source="text")
         active_turn_id = self.state_store.load().active_turn_id
         if active_turn_id and (force_steer or self.config.get("delivery.when_active", "steer") == "steer"):
             try:
@@ -156,6 +171,7 @@ class CodexAppServer:
                     {"threadId": thread_id, "expectedTurnId": active_turn_id, "input": [self._text_input(text)]},
                 )
                 turn = result.get("turn", {})
+                self.state_store.append_event("sent", action="turn/steer", thread_id=thread_id, turn_id=str(turn.get("id", active_turn_id)))
                 return DeliveryResult(action="turn/steer", thread_id=thread_id, turn_id=str(turn.get("id", active_turn_id)))
             except JsonRpcError:
                 if self.config.get("delivery.when_not_steerable", "queue") == "queue":
@@ -168,6 +184,7 @@ class CodexAppServer:
         turn = result.get("turn", {})
         turn_id = str(turn.get("id", ""))
         self.state_store.update(active_turn_id=turn_id)
+        self.state_store.append_event("sent", action="turn/start", thread_id=thread_id, turn_id=turn_id)
         return DeliveryResult(action="turn/start", thread_id=thread_id, turn_id=turn_id)
 
     def interrupt(self) -> DeliveryResult:
