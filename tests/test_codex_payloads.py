@@ -66,6 +66,15 @@ def test_turn_notifications_accept_nested_turn_ids(tmp_path) -> None:
     assert store.load().active_turn_id == ""
 
 
+def test_stale_turn_completed_notification_does_not_clear_new_active_turn(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    store.update(active_turn_id="turn_new")
+    bridge = CodexAppServer(cfg, state_store=store)
+    bridge._handle_notification("turn/completed", {"turn": {"id": "turn_old"}})
+    assert store.load().active_turn_id == "turn_new"
+
+
 def test_deliver_text_steers_active_turn_with_expected_turn_id(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     store = StateStore(tmp_path / "state.json")
@@ -99,3 +108,16 @@ def test_interrupt_sends_active_turn_id(tmp_path) -> None:
     assert params == {"threadId": "thread_1", "turnId": "turn_active"}
     assert result.action == "turn/interrupt"
     assert store.load().active_turn_id == ""
+    events = store.load().events or []
+    assert events[-1]["action"] == "turn/interrupt"
+
+
+def test_interrupt_noop_is_recorded(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = FakeBridge(cfg, state_store=store)
+    result = bridge.interrupt()
+    assert result.action == "noop"
+    events = store.load().events or []
+    assert events[-1]["action"] == "turn/interrupt"
+    assert events[-1]["noop"] is True

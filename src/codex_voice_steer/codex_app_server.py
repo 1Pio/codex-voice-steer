@@ -136,7 +136,8 @@ class CodexAppServer:
                 thread_id=self._id_param(params, "threadId", "thread"),
                 turn_id=turn_id,
             )
-            state = self.state_store.update(active_turn_id="")
+            if not turn_id or not state.active_turn_id or turn_id == state.active_turn_id:
+                state = self.state_store.update(active_turn_id="")
             if state.queued_inputs:
                 queued = state.queued_inputs.pop(0)
                 self.state_store.save(state)
@@ -203,8 +204,10 @@ class CodexAppServer:
     def interrupt(self) -> DeliveryResult:
         state = self.state_store.load()
         if not state.thread_id or not state.active_turn_id:
+            self.state_store.append_event("sent", action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id, noop=True)
             return DeliveryResult(action="noop", thread_id=state.thread_id)
         self.request("turn/interrupt", {"threadId": state.thread_id, "turnId": state.active_turn_id})
+        self.state_store.append_event("sent", action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id)
         self.state_store.update(active_turn_id="")
         return DeliveryResult(action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id)
 
