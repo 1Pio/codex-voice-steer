@@ -161,7 +161,8 @@ class CxvDaemon:
 
     def _voice_pipeline(self, send: bool, config: Config | None = None) -> VoicePipeline:
         config = config or self.config
-        deliver_text = (lambda text: self._codex().deliver_text(text, config=config)) if send else (lambda _text: None)
+        delivery_config = self._voice_delivery_config(config)
+        deliver_text = (lambda text: self._codex().deliver_text(text, config=delivery_config)) if send else (lambda _text: None)
         pipeline = VoicePipeline(
             config,
             wake=OpenWakeWordDetector(config),
@@ -171,6 +172,12 @@ class CxvDaemon:
             event_sink=lambda event, fields: self.state_store.append_event(event, **fields),
         )
         return pipeline
+
+    @staticmethod
+    def _voice_delivery_config(config: Config) -> Config:
+        if config.get("wake.allow_barge_in", True):
+            return config
+        return config.with_overrides({"delivery": {"when_active": "queue"}})
 
     def _effective_config(self, request: dict[str, Any]) -> Config:
         return self.config.with_overrides(self._request_overrides(request))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from codex_voice_steer.config import load_config
-from codex_voice_steer.daemon import stop_background
+from codex_voice_steer.daemon import CxvDaemon, stop_background
 from codex_voice_steer.state import StateStore
 
 
@@ -23,3 +23,15 @@ state_db = "{state_path}"
     state = store.load()
     assert state.active_turn_id == ""
     assert state.listening is False
+
+
+def test_voice_delivery_config_queues_when_barge_in_is_disabled(tmp_path) -> None:
+    config = load_config(overrides={"wake": {"allow_barge_in": False}}, path=tmp_path / "missing.toml")
+    delivery = CxvDaemon._voice_delivery_config(config)
+    assert delivery.get("delivery.when_active") == "queue"
+
+
+def test_voice_delivery_config_preserves_active_policy_when_barge_in_is_enabled(tmp_path) -> None:
+    config = load_config(overrides={"delivery": {"when_active": "steer"}}, path=tmp_path / "missing.toml")
+    delivery = CxvDaemon._voice_delivery_config(config)
+    assert delivery.get("delivery.when_active") == "steer"

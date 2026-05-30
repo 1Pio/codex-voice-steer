@@ -181,7 +181,13 @@ class CodexAppServer:
         thread_id = self.ensure_thread(config)
         self.state_store.append_event("user_final", text=text, source="text")
         active_turn_id = self.state_store.load().active_turn_id
-        if active_turn_id and (force_steer or config.get("delivery.when_active", "steer") == "steer"):
+        when_active = str(config.get("delivery.when_active", "steer"))
+        if active_turn_id and not force_steer and when_active == "queue":
+            queued = state.queued_inputs or []
+            queued.append(text)
+            self.state_store.update(queued_inputs=queued)
+            return DeliveryResult(action="queue", thread_id=thread_id, queued=True)
+        if active_turn_id and (force_steer or when_active == "steer"):
             try:
                 result = self.request(
                     "turn/steer",

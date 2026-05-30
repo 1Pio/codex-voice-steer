@@ -155,6 +155,17 @@ def test_deliver_text_queues_when_active_turn_is_not_steerable(tmp_path) -> None
     assert store.load().queued_inputs == ["queue this"]
 
 
+def test_deliver_text_queues_when_active_policy_is_queue(tmp_path) -> None:
+    cfg = load_config(overrides={"delivery": {"when_active": "queue"}}, path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    store.update(thread_id="thread_1", active_turn_id="turn_active")
+    bridge = FakeBridge(cfg, state_store=store)
+    result = bridge.deliver_text("queue this")
+    assert result.action == "queue"
+    assert bridge.requests == []
+    assert store.load().queued_inputs == ["queue this"]
+
+
 def test_deliver_text_uses_invocation_config_overrides(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     override = cfg.with_overrides({"codex": {"cwd": str(tmp_path), "model": "gpt-test"}})
