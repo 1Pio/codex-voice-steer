@@ -45,3 +45,11 @@ def test_config_set_maps_legacy_permissions_key(tmp_path) -> None:
     parsed = tomllib.loads(path.read_text())
     assert parsed["codex"]["permission_profile"] == ":read-only"
     assert "permissions" not in parsed["codex"]
+
+
+def test_legacy_permissions_key_is_removed_from_resolved_config(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[codex]\npermissions = ":read-only"\n')
+    cfg = load_config(path=path)
+    assert cfg.get("codex.permission_profile") == ":read-only"
+    assert "permissions" not in cfg.data["codex"]

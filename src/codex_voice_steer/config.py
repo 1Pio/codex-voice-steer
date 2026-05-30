@@ -226,6 +226,8 @@ def _normalize_user_config(config: dict[str, Any]) -> dict[str, Any]:
     codex = config.get("codex")
     if isinstance(codex, dict) and "permissions" in codex and "permission_profile" not in codex:
         codex["permission_profile"] = codex["permissions"]
+    if isinstance(codex, dict):
+        codex.pop("permissions", None)
     return config
 
 
