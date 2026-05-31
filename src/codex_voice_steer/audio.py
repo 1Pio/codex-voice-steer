@@ -108,6 +108,7 @@ class AudioLevel:
     gain_db: float
     clipped_samples: int
     clipped_ratio: float
+    device_name: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -116,6 +117,7 @@ class AudioLevel:
             "peak": self.peak,
             "samples": self.samples,
             "device": self.device,
+            "device_name": self.device_name,
             "gain_db": self.gain_db,
             "clipped_samples": self.clipped_samples,
             "clipped_ratio": self.clipped_ratio,
@@ -242,6 +244,20 @@ def _default_output_device_name(sd) -> str:
         return str(device.get("name", ""))
     except Exception:
         return ""
+
+
+def input_device_name(config: Config) -> str:
+    if importlib.util.find_spec("sounddevice") is None:
+        return ""
+    configured = str(config.get("audio.device", "default"))
+    device_arg = _device_arg(configured)
+    try:
+        import sounddevice as sd
+
+        device = sd.query_devices(device=device_arg, kind="input") if device_arg is not None else sd.query_devices(kind="input")
+    except Exception:
+        return ""
+    return str(device.get("name", ""))
 
 
 def _probe_input_stream(config: Config | None, device) -> None:
@@ -471,6 +487,7 @@ def input_levels(config: Config, seconds: float, interval_ms: int = 500) -> Iter
     peak = 0
     clipped_samples = 0
     device = str(config.get("audio.device", "default"))
+    device_name = input_device_name(config)
     gain_db = float(config.get("audio.input_gain_db", 0.0))
     for frame in MicCapture(config).frames():
         remaining = target_samples - captured_samples
@@ -494,6 +511,7 @@ def input_levels(config: Config, seconds: float, interval_ms: int = 500) -> Iter
                 peak=peak,
                 samples=window_samples,
                 device=device,
+                device_name=device_name,
                 gain_db=gain_db,
                 clipped_samples=clipped_samples,
                 clipped_ratio=clipped_ratio,

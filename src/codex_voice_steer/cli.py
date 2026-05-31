@@ -351,14 +351,30 @@ def _audio_command(args: argparse.Namespace, config: Config | None = None) -> in
     if args.audio_command == "meter":
         cfg = config or load_config()
         cfg = _audio_override_config(cfg, device=args.device, gain_db=args.gain_db)
+        max_peak = 0
+        last_device = str(cfg.get("audio.device", "default"))
+        last_device_name = ""
+        samples_seen = 0
         for level in input_levels(cfg, seconds=float(args.seconds), interval_ms=int(args.interval_ms)):
+            max_peak = max(max_peak, int(level.peak))
+            last_device = level.device
+            last_device_name = level.device_name
+            samples_seen += int(level.samples)
             if args.jsonl:
                 print(json.dumps(level.to_dict(), sort_keys=True))
             else:
+                device_label = level.device if not level.device_name else f"{level.device} ({level.device_name})"
                 print(
                     f"{level.elapsed_sec:5.2f}s  rms={level.rms:8.2f}  peak={level.peak:5d}  "
-                    f"clipped={level.clipped_ratio:.3f}  gain={level.gain_db:g}dB  device={level.device}"
+                    f"clipped={level.clipped_ratio:.3f}  gain={level.gain_db:g}dB  device={device_label}"
                 )
+        if samples_seen and max_peak == 0 and not args.jsonl:
+            device_label = last_device if not last_device_name else f"{last_device} ({last_device_name})"
+            print(
+                "warning: input stream opened but captured digital silence from "
+                f"{device_label}; try `cxv audio meter --device \"MacBook Pro Microphone\"`, "
+                "check macOS microphone permission for your terminal app, and avoid numeric device indexes if they change."
+            )
         return 0
     raise ValueError(f"unknown audio command: {args.audio_command}")
 
@@ -394,9 +410,11 @@ def _render_audio_devices(devices, kind: str = "input") -> str:
         lines.append("Use one with: cxv audio loopback-test --output-device <index-or-name> ...")
     elif kind == "all":
         lines.append("Use input with: cxv config set audio.device <index-or-name>")
+        lines.append('Prefer a quoted input name if indexes change, for example: cxv config set audio.device "MacBook Pro Microphone"')
         lines.append("Use output with: cxv audio loopback-test --output-device <index-or-name> ...")
     else:
         lines.append("Use one with: cxv config set audio.device <index-or-name>")
+        lines.append('Prefer a quoted name if indexes change, for example: cxv config set audio.device "MacBook Pro Microphone"')
     return "\n".join(lines)
 
 

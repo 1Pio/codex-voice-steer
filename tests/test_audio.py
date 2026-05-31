@@ -8,7 +8,7 @@ import wave
 import pytest
 
 from codex_voice_steer import audio
-from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, play_wav, record_input_wav
+from codex_voice_steer.audio import apply_gain_pcm16, MicCapture, audio_readiness, input_device_name, input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, play_wav, record_input_wav
 from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 
@@ -50,6 +50,24 @@ def test_audio_readiness_checks_configured_device_index(tmp_path, monkeypatch) -
     result = audio_readiness(cfg)
     assert result.ok is True
     assert seen == {"device": 3, "kind": "input"}
+
+
+def test_input_device_name_resolves_configured_device(tmp_path, monkeypatch) -> None:
+    seen = {}
+    fake_sd = types.ModuleType("sounddevice")
+
+    def query_devices(device=None, kind=None):
+        seen["device"] = device
+        seen["kind"] = kind
+        return {"name": "MacBook Pro Microphone"}
+
+    fake_sd.query_devices = query_devices
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+    monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _name: object())
+
+    cfg = load_config(overrides={"audio": {"device": "0"}}, path=tmp_path / "missing.toml")
+    assert input_device_name(cfg) == "MacBook Pro Microphone"
+    assert seen == {"device": 0, "kind": "input"}
 
 
 def test_audio_readiness_can_probe_configured_stream(tmp_path, monkeypatch) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from codex_voice_steer.audio import AudioDevice
+from codex_voice_steer.audio import AudioDevice, AudioLevel
 from codex_voice_steer import cli
 from codex_voice_steer.cli import _payload, _render_audio_devices, _render_compact_status, build_parser
 from codex_voice_steer.config import load_config
@@ -211,6 +211,7 @@ def test_render_audio_devices_marks_default_and_config_hint() -> None:
     assert "1: Loopback Input (2 input channel(s))" in output
     assert "2: MacBook Pro Microphone (1 input channel(s)) *" in output
     assert "cxv config set audio.device" in output
+    assert '"MacBook Pro Microphone"' in output
 
 
 def test_render_output_devices_uses_loopback_hint() -> None:
@@ -222,6 +223,34 @@ def test_render_output_devices_uses_loopback_hint() -> None:
     )
     assert "3: MacBook Pro Speakers (2 output channel(s)) *" in output
     assert "loopback-test --output-device" in output
+
+
+def test_audio_meter_warns_when_stream_is_silent(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(
+        cli,
+        "input_levels",
+        lambda *_args, **_kwargs: [
+            AudioLevel(
+                elapsed_sec=0.5,
+                rms=0.0,
+                peak=0,
+                samples=8000,
+                device="0",
+                device_name="MacBook Pro Microphone",
+                gain_db=0.0,
+                clipped_samples=0,
+                clipped_ratio=0.0,
+            )
+        ],
+    )
+    args = SimpleNamespace(audio_command="meter", device=None, gain_db=None, seconds=0.5, interval_ms=500, jsonl=False)
+
+    result = cli._audio_command(args, load_config(path=tmp_path / "missing.toml"))
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "device=0 (MacBook Pro Microphone)" in output
+    assert "captured digital silence" in output
 
 
 def test_doctor_returns_nonzero_when_any_check_blocks(monkeypatch, tmp_path, capsys) -> None:
