@@ -40,6 +40,8 @@ class WakeCalibrationResult:
             return "wake detected with sufficient input level"
         if not self.level_ok:
             return "input level is too low for a reliable live wake proof"
+        if self.wake.max_score < self.wake.threshold * 0.2:
+            return "input level is sufficient, but wake score is far below threshold; retrain or replace the wake model instead of lowering sensitivity"
         return "input level is sufficient, but wake score did not reach threshold"
 
 

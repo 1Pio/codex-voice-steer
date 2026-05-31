@@ -33,6 +33,18 @@ def test_calibration_rejects_weak_input_even_when_score_hits() -> None:
     assert "too low" in result.verdict
 
 
+def test_calibration_identifies_far_below_threshold_model_score() -> None:
+    result = WakeCalibrationResult(
+        recording=_recording(rms=600, peak=5000),
+        wake=_wake(hit=False, max_score=0.04, threshold=0.5),
+        min_rms=100,
+        min_peak=500,
+    )
+    assert result.level_ok is True
+    assert result.ok is False
+    assert "retrain or replace" in result.verdict
+
+
 def test_calibration_records_then_scores_wake_audio(tmp_path, monkeypatch) -> None:
     wav_path = tmp_path / "live.wav"
     seen = {}
@@ -72,12 +84,12 @@ def _recording(wav_path: Path | None = None, rms: float = 0.0, peak: int = 0) ->
     )
 
 
-def _wake(wav_path: Path | None = None, hit: bool = False) -> WakeAudioTest:
+def _wake(wav_path: Path | None = None, hit: bool = False, max_score: float | None = None, threshold: float = 0.5) -> WakeAudioTest:
     return WakeAudioTest(
         wav_path=wav_path or Path("/tmp/live.wav"),
         hit=hit,
-        max_score=0.6 if hit else 0.1,
-        threshold=0.5,
+        max_score=max_score if max_score is not None else (0.6 if hit else 0.1),
+        threshold=threshold,
         frame_count=12,
         sample_rate=16000,
         channels=1,
