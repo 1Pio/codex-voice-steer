@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -253,11 +254,24 @@ def _yes_no(value: Any) -> str:
 def _event_summary(event: dict[str, Any]) -> str:
     name = str(event.get("event", "event"))
     details: list[str] = []
-    for key in ("action", "status", "turn_id", "transcript", "reason", "error"):
+    event_time = _event_time_label(event)
+    if event_time:
+        details.append(f"at={event_time}")
+    for key in ("action", "status", "turn_id", "transcript", "reason", "error", "device", "noop"):
         value = event.get(key)
-        if value:
+        if value is not None and value != "":
             details.append(f"{key}={_clip(str(value))}")
     return name if not details else f"{name} " + " ".join(details)
+
+
+def _event_time_label(event: dict[str, Any]) -> str:
+    try:
+        ts = float(event.get("ts", 0.0))
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    return time.strftime("%H:%M:%S", time.localtime(ts))
 
 
 def _clip(value: str, limit: int = 80) -> str:

@@ -94,11 +94,13 @@ class CxvDaemon:
                 return {"ok": False, "error": "voice runtime is not ready", "blockers": blockers}
             self.listen_overrides = self._request_overrides(request)
             state = self.state_store.update(listening=True)
+            self.state_store.append_event("listening_started", device=str(self.config.get("audio.device", "default")))
             if self.listen_task is None or self.listen_task.done():
                 self.listen_task = asyncio.create_task(self._listen_loop())
             return {"ok": True, "state": state.to_dict()}
         if command == "pause":
             state = self.state_store.update(listening=False)
+            self.state_store.append_event("listening_paused")
             self.listen_overrides = {}
             if self.listen_task is not None:
                 self.listen_task.cancel()

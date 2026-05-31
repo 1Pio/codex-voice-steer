@@ -187,8 +187,8 @@ def test_compact_status_does_not_dump_full_event_history() -> None:
                 "queued_inputs": ["next"],
                 "cwd": "/tmp/cxv",
                 "events": [
-                    {"event": "old", "transcript": "ignore me"},
-                    {"event": "stt_final", "transcript": "hello " * 40},
+                    {"event": "old", "transcript": "ignore me", "ts": 100.0},
+                    {"event": "stt_final", "transcript": "hello " * 40, "ts": 200.0},
                 ],
             },
         },
@@ -197,6 +197,7 @@ def test_compact_status_does_not_dump_full_event_history() -> None:
     assert "cxv daemon: running" in output
     assert "listening: yes" in output
     assert "queued inputs: 1" in output
+    assert "at=" in output
     assert "old" not in output
     assert "hello " * 20 not in output
 

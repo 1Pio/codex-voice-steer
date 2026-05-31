@@ -71,6 +71,30 @@ def test_voice_delivery_config_preserves_active_policy_when_barge_in_is_enabled(
     assert delivery.get("delivery.when_active") == "steer"
 
 
+def test_daemon_records_listen_and_pause_events(tmp_path, monkeypatch) -> None:
+    config = load_config(
+        overrides={
+            "server": {
+                "socket_path": str(tmp_path / "cxv.sock"),
+                "pid_path": str(tmp_path / "cxv.pid"),
+                "state_db": str(tmp_path / "state.json"),
+            },
+            "audio": {"device": "MacBook Pro Microphone"},
+        },
+        path=tmp_path / "missing.toml",
+    )
+    cxv = CxvDaemon(config)
+    monkeypatch.setattr(cxv, "_listen_blockers", lambda: [])
+    monkeypatch.setattr(cxv, "_listen_loop", lambda: asyncio.sleep(3600))
+
+    async def run() -> list[str]:
+        await cxv._dispatch({"command": "listen"})
+        await cxv._dispatch({"command": "pause"})
+        return [str(event["event"]) for event in cxv.state_store.load().events or []]
+
+    assert asyncio.run(run())[-2:] == ["listening_started", "listening_paused"]
+
+
 def test_daemon_reuses_live_wake_detector_for_same_config(tmp_path, monkeypatch) -> None:
     created = []
 
