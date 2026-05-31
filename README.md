@@ -22,3 +22,16 @@ cxv wake test-audio /path/to/scarlett.wav
 cxv voice test-audio /path/to/full-turn.wav
 cxv voice test-audio /path/to/full-turn.wav --send
 ```
+
+Wake sample collection for retraining/evaluation uses real microphone takes and keeps LiveKit out of runtime source:
+
+```bash
+cxv wake samples init ./scarlett-samples
+cxv wake samples session ./scarlett-samples --label positive --preset scarlett
+cxv wake samples session ./scarlett-samples --label negative --prompt starlet --tag hard-negative
+cxv wake samples session ./scarlett-samples --label noise --prompt keyboard --tag keyboard
+cxv wake samples list ./scarlett-samples
+cxv wake samples score ./scarlett-samples --threshold 0.5
+```
+
+Useful hard negatives: `starlet`, `Charlotte`, `scarlet fever`, `let`, `start it`, `scale it`, normal speech. Useful environmental negatives: keyboard, fan, room noise, silence, and handling noise. Use `--keep-weak` for intentional silence or very quiet noise takes.

@@ -72,6 +72,58 @@ def test_wake_calibrate_parses() -> None:
     assert args.min_peak == 2000
 
 
+def test_wake_samples_commands_parse() -> None:
+    parser = build_parser()
+    init = parser.parse_args(["wake", "samples", "init", "/tmp/samples"])
+    record = parser.parse_args(
+        [
+            "wake",
+            "samples",
+            "record",
+            "/tmp/samples",
+            "--label",
+            "positive",
+            "--prompt",
+            "scarlett",
+            "--tag",
+            "near",
+            "--device",
+            "0",
+            "--gain-db",
+            "6",
+            "--min-rms",
+            "50",
+            "--min-peak",
+            "200",
+            "--keep-weak",
+        ]
+    )
+    session = parser.parse_args(["wake", "samples", "session", "/tmp/samples", "--label", "negative", "--preset", "scarlett"])
+    listing = parser.parse_args(["wake", "samples", "list", "/tmp/samples", "--json"])
+    score = parser.parse_args(["wake", "samples", "score", "/tmp/samples", "--model", "models/wake/scarlett.onnx", "--threshold", "0.4", "--label", "positive", "--json"])
+
+    assert init.wake_command == "samples"
+    assert init.samples_command == "init"
+    assert record.samples_command == "record"
+    assert record.label == "positive"
+    assert record.prompt == "scarlett"
+    assert record.tag == "near"
+    assert record.device == "0"
+    assert record.gain_db == 6
+    assert record.min_rms == 50
+    assert record.min_peak == 200
+    assert record.keep_weak is True
+    assert session.samples_command == "session"
+    assert session.preset == "scarlett"
+    assert listing.samples_command == "list"
+    assert listing.json is True
+    assert score.samples_command == "score"
+    assert score.model == "models/wake/scarlett.onnx"
+    assert score.threshold == 0.4
+    assert score.label == "positive"
+    assert score.json is True
+
+
 def test_voice_test_audio_parses() -> None:
     args = build_parser().parse_args(["voice", "test-audio", "/tmp/turn.wav", "--send"])
     assert args.command == "voice"

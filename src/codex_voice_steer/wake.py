@@ -135,8 +135,8 @@ def _packaged_openwakeword_model_path(name: str) -> Path:
     return Path(__file__).resolve().parent / "resources" / "openwakeword" / "models" / name
 
 
-def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = None) -> WakeAudioTest:
-    detector = OpenWakeWordDetector(config)
+def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = None, detector: OpenWakeWordDetector | None = None) -> WakeAudioTest:
+    detector = detector or OpenWakeWordDetector(config)
     threshold = detector.sensitivity if threshold is None else threshold
     max_score = 0.0
     max_score_time_sec = 0.0

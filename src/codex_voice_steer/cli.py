@@ -19,6 +19,18 @@ from .doctor import render_doctor, run_doctor
 from .models import render_models
 from .tui import run_foreground_tui
 from .wake import score_wake_audio
+from .wake_samples import (
+    HARD_NEGATIVE_PROMPTS,
+    ENVIRONMENTAL_NEGATIVE_PROMPTS,
+    capture_take,
+    init_dataset,
+    next_take_index,
+    prompts_for_args,
+    render_dataset_summary,
+    render_score_summary,
+    score_dataset,
+    summarize_dataset,
+)
 from .wake_training import render_wake_training_checks, wake_training_checks
 
 
@@ -129,6 +141,27 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this calibration.")
     calibrate.add_argument("--min-rms", type=float, default=1000.0, help="Minimum RMS for a strong enough live proof.")
     calibrate.add_argument("--min-peak", type=int, default=4000, help="Minimum peak amplitude for a strong enough live proof.")
+    samples = wake_sub.add_parser("samples", help="Capture and score real-user wake-word training samples.")
+    samples_sub = samples.add_subparsers(dest="samples_command", required=True)
+    samples_init = samples_sub.add_parser("init", help="Create a wake sample dataset directory.")
+    samples_init.add_argument("dir", help="Dataset directory.")
+    samples_record = samples_sub.add_parser("record", help="Record one take; press Enter to stop and save.")
+    _add_wake_samples_capture_args(samples_record)
+    samples_session = samples_sub.add_parser("session", help="Record many takes with Space/Enter/q controls.")
+    _add_wake_samples_capture_args(samples_session, include_prompt=False)
+    prompt_group = samples_session.add_mutually_exclusive_group()
+    prompt_group.add_argument("--prompt", default="", help="Prompt text for this take.")
+    prompt_group.add_argument("--prompts", help="File with one prompt per line.")
+    prompt_group.add_argument("--preset", choices=["scarlett"], help="Use built-in prompt sequence.")
+    samples_list = samples_sub.add_parser("list", help="Summarize wake sample counts, duration, levels, tags, and prompts.")
+    samples_list.add_argument("dir", help="Dataset directory.")
+    samples_list.add_argument("--json", action="store_true", help="Print summary as JSON.")
+    samples_score = samples_sub.add_parser("score", help="Score sample WAVs through the current OpenWakeWord adapter.")
+    samples_score.add_argument("dir", help="Dataset directory.")
+    samples_score.add_argument("--model", default=None, help="Wake model path, default models/wake/scarlett.onnx.")
+    samples_score.add_argument("--threshold", type=float, default=None, help="Override wake threshold.")
+    samples_score.add_argument("--label", choices=["positive", "negative", "noise"], default=None, help="Score only one label folder.")
+    samples_score.add_argument("--json", action="store_true", help="Print score summary as JSON.")
 
     voice = sub.add_parser("voice", help="Controlled full-pipeline voice test utilities.")
     voice_sub = voice.add_subparsers(dest="voice_command", required=True)
@@ -453,7 +486,131 @@ def _wake_command(args: argparse.Namespace, config: Config) -> int:
         )
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
         return 0 if result.ok else 1
+    if args.wake_command == "samples":
+        return _wake_samples_command(args, config)
     raise ValueError(f"unknown wake command: {args.wake_command}")
+
+
+def _add_wake_samples_capture_args(parser: argparse.ArgumentParser, include_prompt: bool = True) -> None:
+    parser.add_argument("dir", help="Dataset directory.")
+    parser.add_argument("--label", required=True, choices=["positive", "negative", "noise"], help="Sample label.")
+    if include_prompt:
+        parser.add_argument("--prompt", default="", help="Prompt text for this take.")
+    parser.add_argument("--tag", default="", help="Short tag added to filenames and metadata.")
+    parser.add_argument("--device", help="Temporary input device override by index or name.")
+    parser.add_argument("--gain-db", type=float, help="Temporary input gain in decibels.")
+    parser.add_argument("--min-rms", type=float, default=100.0, help="Minimum RMS before saving without --keep-weak.")
+    parser.add_argument("--min-peak", type=int, default=500, help="Minimum peak before saving without --keep-weak.")
+    parser.add_argument("--keep-weak", action="store_true", help="Save weak or silent takes instead of discarding them.")
+
+
+def _wake_samples_command(args: argparse.Namespace, config: Config) -> int:
+    dataset_dir = Path(args.dir)
+    if args.samples_command == "init":
+        init_dataset(dataset_dir)
+        print(f"wake sample dataset: {dataset_dir}")
+        print("created/preserved: positive/, negative/, noise/, metadata.jsonl")
+        return 0
+    if args.samples_command == "record":
+        cfg = _audio_override_config(config, device=args.device, gain_db=args.gain_db)
+        print(f"recording {args.label}; press Enter to save")
+        try:
+            result = capture_take(
+                cfg,
+                dataset_dir,
+                label=args.label,
+                prompt=args.prompt,
+                tag=args.tag,
+                mode="record",
+                min_rms=float(args.min_rms),
+                min_peak=int(args.min_peak),
+                keep_weak=bool(args.keep_weak),
+                stop_keys=("enter",),
+                discard_keys=(),
+            )
+        except KeyboardInterrupt:
+            print("\naborted; current take discarded")
+            return 130
+        return _print_capture_result(dataset_dir, result)
+    if args.samples_command == "session":
+        cfg = _audio_override_config(config, device=args.device, gain_db=args.gain_db)
+        prompts = prompts_for_args(prompt=args.prompt, prompts_file=Path(args.prompts) if args.prompts else None, preset=args.preset or "")
+        single_prompt = len(prompts) == 1
+        if args.preset == "scarlett":
+            print("preset scarlett prompts loaded")
+            print("hard negatives to collect separately: " + ", ".join(HARD_NEGATIVE_PROMPTS))
+            print("environmental negatives to collect separately: " + ", ".join(ENVIRONMENTAL_NEGATIVE_PROMPTS))
+        controls = "space=save+next enter=save+done q=discard+quit ctrl-c=abort"
+        print(controls)
+        while True:
+            take_number = next_take_index(dataset_dir, args.label)
+            prompt = prompts[0] if single_prompt else prompts[(take_number - 1) % len(prompts)]
+
+            def status(payload: dict[str, object]) -> None:
+                print(
+                    "\r"
+                    f"label={args.label} take={take_number:04d} "
+                    f"prompt={prompt or '-'} tag={args.tag or '-'} "
+                    f"elapsed={float(payload['seconds']):.2f}s "
+                    f"rms={float(payload['rms']):.1f} peak={int(payload['peak'])} "
+                    f"{controls}",
+                    end="",
+                    flush=True,
+                )
+
+            try:
+                result = capture_take(
+                    cfg,
+                    dataset_dir,
+                    label=args.label,
+                    prompt=prompt,
+                    tag=args.tag,
+                    mode="session",
+                    command="wake samples session",
+                    min_rms=float(args.min_rms),
+                    min_peak=int(args.min_peak),
+                    keep_weak=bool(args.keep_weak),
+                    stop_keys=("space", "enter"),
+                    discard_keys=("q",),
+                    status=status,
+                )
+            except KeyboardInterrupt:
+                print("\naborted; current take discarded")
+                return 130
+            print()
+            _print_capture_result(dataset_dir, result)
+            if result.action in {"saved_done", "discard_quit"}:
+                return 0
+            if result.action == "weak_discarded":
+                continue
+    if args.samples_command == "list":
+        summary = summarize_dataset(dataset_dir)
+        if args.json:
+            print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_dataset_summary(summary))
+        return 0
+    if args.samples_command == "score":
+        summary = score_dataset(config, dataset_dir, model=args.model, threshold=args.threshold, label=args.label)
+        if args.json:
+            print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_score_summary(summary))
+        return 0
+    raise ValueError(f"unknown wake samples command: {args.samples_command}")
+
+
+def _print_capture_result(dataset_dir: Path, result) -> int:
+    if result.take is None:
+        print(result.reason or result.action)
+        return 1 if result.action == "weak_discarded" else 0
+    rel = result.take.path.relative_to(dataset_dir)
+    weak = " weak" if result.take.weak else ""
+    print(
+        f"saved{weak}: {rel} "
+        f"({result.take.seconds:.2f}s rms={result.take.rms:.1f} peak={result.take.peak} clipped={result.take.clipped_ratio:.3f})"
+    )
+    return 0
 
 
 def _audio_override_config(config: Config, device: str | None = None, gain_db: float | None = None) -> Config:
