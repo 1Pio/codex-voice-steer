@@ -148,6 +148,13 @@ def test_audio_meter_parses() -> None:
     assert args.jsonl is True
 
 
+def test_config_unset_parses() -> None:
+    args = build_parser().parse_args(["config", "unset", "audio.devices"])
+    assert args.command == "config"
+    assert args.config_command == "unset"
+    assert args.key == "audio.devices"
+
+
 def test_daemon_payload_includes_cli_overrides() -> None:
     args = build_parser().parse_args(["--cwd", "/tmp/cxv-cwd", "--model", "gpt-test", "text", "hello"])
     payload = _payload(args, "text", text="hello")

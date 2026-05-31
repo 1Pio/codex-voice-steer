@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import difflib
 import json
 import tomllib
 from dataclasses import dataclass
@@ -207,6 +208,7 @@ def set_config_value(dotted: str, value: str, path: Path | None = None) -> Path:
     cfg_path = path or config_path()
     cfg = load_config(path=cfg_path).data if cfg_path.exists() else copy.deepcopy(DEFAULT_CONFIG)
     dotted = _canonical_key(dotted)
+    _require_known_config_key(dotted)
     parsed = parse_value(value)
     current = cfg
     parts = dotted.split(".")
@@ -219,6 +221,43 @@ def set_config_value(dotted: str, value: str, path: Path | None = None) -> Path:
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(_toml(cfg))
     return cfg_path
+
+
+def unset_config_value(dotted: str, path: Path | None = None) -> Path:
+    cfg_path = path or config_path()
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"config file does not exist: {cfg_path}")
+    cfg = tomllib.loads(cfg_path.read_text())
+    dotted = _canonical_key(dotted)
+    parts = dotted.split(".")
+    current: Any = cfg
+    for part in parts[:-1]:
+        if not isinstance(current, dict) or part not in current:
+            raise ValueError(f"config key is not set: {dotted}")
+        current = current[part]
+    if not isinstance(current, dict) or parts[-1] not in current:
+        raise ValueError(f"config key is not set: {dotted}")
+    del current[parts[-1]]
+    _prune_empty_tables(cfg, parts[:-1])
+    cfg_path.write_text(_toml(cfg))
+    return cfg_path
+
+
+def unknown_config_keys(data: dict[str, Any]) -> list[str]:
+    unknown: list[str] = []
+    _collect_unknown_keys(data, DEFAULT_CONFIG, [], unknown)
+    return unknown
+
+
+def config_key_suggestion(dotted: str) -> str:
+    matches = difflib.get_close_matches(_canonical_key(dotted), known_config_keys(), n=1, cutoff=0.75)
+    return matches[0] if matches else ""
+
+
+def known_config_keys() -> list[str]:
+    keys: list[str] = []
+    _collect_known_keys(DEFAULT_CONFIG, [], keys)
+    return keys
 
 
 def _normalize_user_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -235,6 +274,51 @@ def _canonical_key(dotted: str) -> str:
     if dotted == "codex.permissions":
         return "codex.permission_profile"
     return dotted
+
+
+def _require_known_config_key(dotted: str) -> None:
+    if dotted in known_config_keys():
+        return
+    suggestion = config_key_suggestion(dotted)
+    suffix = f"; did you mean {suggestion!r}?" if suggestion else ""
+    raise ValueError(f"unknown config key: {dotted!r}{suffix}")
+
+
+def _collect_known_keys(data: dict[str, Any], prefix: list[str], keys: list[str]) -> None:
+    for key, value in data.items():
+        path = [*prefix, key]
+        if isinstance(value, dict):
+            _collect_known_keys(value, path, keys)
+        else:
+            keys.append(".".join(path))
+
+
+def _collect_unknown_keys(data: dict[str, Any], schema: dict[str, Any], prefix: list[str], unknown: list[str]) -> None:
+    for key, value in data.items():
+        path = [*prefix, key]
+        expected = schema.get(key)
+        if key not in schema:
+            unknown.append(".".join(path))
+        elif isinstance(value, dict) and isinstance(expected, dict):
+            _collect_unknown_keys(value, expected, path, unknown)
+
+
+def _prune_empty_tables(data: dict[str, Any], parts: list[str]) -> None:
+    if not parts:
+        return
+    parents: list[tuple[dict[str, Any], str]] = []
+    current: Any = data
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return
+        parents.append((current, part))
+        current = current[part]
+    for parent, key in reversed(parents):
+        value = parent.get(key)
+        if isinstance(value, dict) and not value:
+            del parent[key]
+        else:
+            break
 
 
 def parse_value(value: str) -> Any:

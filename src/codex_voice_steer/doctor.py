@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .audio import audio_readiness
-from .config import Config
+from .config import Config, config_key_suggestion, unknown_config_keys
 from .vad import vad_readiness
 from .wake import wake_readiness
 
@@ -20,6 +20,15 @@ class Check:
 
 def run_doctor(config: Config, repo_root: Path | None = None) -> list[Check]:
     checks: list[Check] = []
+    unknown_keys = unknown_config_keys(config.data)
+    if unknown_keys:
+        details = []
+        for key in unknown_keys:
+            suggestion = config_key_suggestion(key)
+            details.append(f"{key} (did you mean {suggestion}?)" if suggestion else key)
+        checks.append(Check("config", False, "unknown key(s): " + ", ".join(details)))
+    else:
+        checks.append(Check("config", True, f"loaded {config.path}"))
     codex_path = shutil.which("codex")
     macparakeet_command = str(config.get("stt.macparakeet.command", "macparakeet-cli"))
     macparakeet_path = shutil.which(macparakeet_command)

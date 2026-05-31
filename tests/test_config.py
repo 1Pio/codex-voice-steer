@@ -4,7 +4,7 @@ import tomllib
 
 import pytest
 
-from codex_voice_steer.config import DEFAULT_CONFIG, default_config_toml, load_config, set_config_value
+from codex_voice_steer.config import DEFAULT_CONFIG, default_config_toml, load_config, set_config_value, unknown_config_keys, unset_config_value
 
 
 def test_default_config_has_no_version_key() -> None:
@@ -37,6 +37,21 @@ def test_config_set_writes_dotted_value(tmp_path) -> None:
     set_config_value("instructions.msd.enabled", "true", path=path)
     cfg = load_config(path=path)
     assert cfg.get("instructions.msd.enabled") is True
+
+
+def test_config_set_rejects_unknown_keys(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    with pytest.raises(ValueError, match="audio\\.device"):
+        set_config_value("audio.devices", "0", path=path)
+
+
+def test_config_unset_removes_accidental_key(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[audio]\ndevices = 0\ndevice = \"default\"\n")
+    unset_config_value("audio.devices", path=path)
+    cfg = load_config(path=path)
+    assert cfg.get("audio.devices") is None
+    assert unknown_config_keys(cfg.data) == []
 
 
 def test_config_set_maps_legacy_permissions_key(tmp_path) -> None:

@@ -12,7 +12,7 @@ from typing import Any
 from .agents import install_agent, list_agents, print_agent
 from .audio import input_levels, list_input_devices, list_output_devices, play_and_record_input_wav, play_wav, record_input_wav
 from .calibration import calibrate_wake
-from .config import Config, load_config, set_config_value, write_default_config
+from .config import Config, load_config, set_config_value, unset_config_value, write_default_config
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
 from .models import render_models
@@ -78,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     cfg_set = cfg_sub.add_parser("set", help="Set a dotted config value.")
     cfg_set.add_argument("key")
     cfg_set.add_argument("value")
+    cfg_unset = cfg_sub.add_parser("unset", help="Remove a key from the user config.")
+    cfg_unset.add_argument("key")
 
     sub.add_parser("models", help="List built-in compatible STT models.")
     sub.add_parser("doctor", help="Check local cxv dependencies and blockers.")
@@ -280,6 +282,10 @@ def _config_command(args: argparse.Namespace, config: Config) -> int:
         return subprocess.call([editor, str(config.path)])
     if args.config_command == "set":
         path = set_config_value(args.key, args.value)
+        print(path)
+        return 0
+    if args.config_command == "unset":
+        path = unset_config_value(args.key)
         print(path)
         return 0
     raise ValueError(f"unknown config command: {args.config_command}")
