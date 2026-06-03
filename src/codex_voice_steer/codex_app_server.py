@@ -37,7 +37,7 @@ class CodexAppServer:
         self.proc: subprocess.Popen[str] | None = None
         self._next_id = 1
         self._pending: dict[int, dict[str, Any]] = {}
-        self._lock = threading.Lock()
+        self._condition = threading.Condition()
         self._reader: threading.Thread | None = None
         self.codex_home = ""
 
@@ -92,17 +92,15 @@ class CodexAppServer:
     def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if self.proc is None or self.proc.stdin is None:
             raise RuntimeError("app-server is not running")
-        with self._lock:
+        with self._condition:
             request_id = self._next_id
             self._next_id += 1
-        payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-        self.proc.stdin.write(json.dumps(payload) + "\n")
-        self.proc.stdin.flush()
-        while True:
-            with self._lock:
-                if request_id in self._pending:
-                    response = self._pending.pop(request_id)
-                    break
+            payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+            self.proc.stdin.write(json.dumps(payload) + "\n")
+            self.proc.stdin.flush()
+            while request_id not in self._pending:
+                self._condition.wait()
+            response = self._pending.pop(request_id)
         if "error" in response:
             raise JsonRpcError(f"{method} failed: {response['error']}", response["error"])
         return dict(response.get("result") or {})
@@ -114,8 +112,9 @@ class CodexAppServer:
                 continue
             message = json.loads(line)
             if "id" in message:
-                with self._lock:
+                with self._condition:
                     self._pending[int(message["id"])] = message
+                    self._condition.notify_all()
                 continue
             method = str(message.get("method", ""))
             params = dict(message.get("params") or {})
@@ -128,7 +127,7 @@ class CodexAppServer:
             if turn_id:
                 self.state_store.update(active_turn_id=turn_id)
             self.state_store.append_event("turn_started", turn_id=turn_id)
-        elif method == "agentMessage/delta":
+        elif method in {"agentMessage/delta", "item/agentMessage/delta"}:
             self.state_store.append_event(
                 "codex_visible_delta",
                 thread_id=self._id_param(params, "threadId", "thread"),

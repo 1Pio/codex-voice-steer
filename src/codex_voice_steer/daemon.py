@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ class CxvDaemon:
         self.state_store = StateStore(expand_path(str(config.get("server.state_db"))))
         self.codex: CodexAppServer | None = None
         self.listen_task: asyncio.Task[None] | None = None
+        self.listen_stop_event: threading.Event | None = None
         self.listen_overrides: dict[str, Any] = {}
         self.live_wake: OpenWakeWordDetector | None = None
         self.live_wake_key: tuple[object, ...] | None = None
@@ -58,6 +60,7 @@ class CxvDaemon:
                 server.close()
                 await server.wait_closed()
         finally:
+            await self._stop_listening(record_event=False)
             if idle_task is not None:
                 idle_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -89,6 +92,8 @@ class CxvDaemon:
             return {"ok": True, "running": True, "state": state.to_dict()}
         if command == "listen":
             blockers = self._listen_blockers()
+            if self._listener_still_stopping():
+                blockers.append("microphone listener is still stopping; try again shortly")
             if blockers:
                 self.state_store.update(listening=False)
                 return {"ok": False, "error": "voice runtime is not ready", "blockers": blockers}
@@ -96,15 +101,12 @@ class CxvDaemon:
             state = self.state_store.update(listening=True)
             self.state_store.append_event("listening_started", device=str(self.config.get("audio.device", "default")))
             if self.listen_task is None or self.listen_task.done():
-                self.listen_task = asyncio.create_task(self._listen_loop())
+                stop_event = threading.Event()
+                self.listen_stop_event = stop_event
+                self.listen_task = asyncio.create_task(self._listen_loop(stop_event, dict(self.listen_overrides)))
             return {"ok": True, "state": state.to_dict()}
         if command == "pause":
-            state = self.state_store.update(listening=False)
-            self.state_store.append_event("listening_paused")
-            self.listen_overrides = {}
-            if self.listen_task is not None:
-                self.listen_task.cancel()
-                self.listen_task = None
+            state = await self._stop_listening(record_event=True)
             return {"ok": True, "state": state.to_dict()}
         if command == "bind":
             state = self.state_store.update(thread_id=request.get("thread_id", ""), cwd=request.get("cwd", "."))
@@ -172,10 +174,12 @@ class CxvDaemon:
         ]
         return [check.reason for check in checks if not check.ok]
 
-    async def _listen_loop(self) -> None:
+    async def _listen_loop(self, stop_event: threading.Event, overrides: dict[str, Any]) -> None:
         try:
-            while self.state_store.load().listening:
-                result = await asyncio.to_thread(self._run_voice_turn)
+            while self.state_store.load().listening and not stop_event.is_set():
+                result = await asyncio.to_thread(self._run_voice_turn, stop_event, overrides)
+                if stop_event.is_set() or not self.state_store.load().listening:
+                    break
                 self.state_store.append_event(
                     "voice_turn",
                     status=result.status,
@@ -188,10 +192,41 @@ class CxvDaemon:
         except Exception as exc:
             self.state_store.append_event("voice_error", error=str(exc))
             self.state_store.update(listening=False)
+        finally:
+            if self.listen_stop_event is stop_event:
+                self.listen_stop_event = None
+            if self.listen_task is asyncio.current_task():
+                self.listen_task = None
 
-    def _run_voice_turn(self):
-        config = self.config.with_overrides(self.listen_overrides)
-        return self._voice_pipeline(send=True, config=config).run_once(MicCapture(config).frames())
+    async def _stop_listening(self, record_event: bool) -> Any:
+        state = self.state_store.update(listening=False)
+        if record_event:
+            self.state_store.append_event("listening_paused")
+        self.listen_overrides = {}
+        if self.listen_stop_event is not None:
+            self.listen_stop_event.set()
+        task = self.listen_task
+        if task is not None and not task.done():
+            done, _pending = await asyncio.wait({task}, timeout=2.0)
+            if not done:
+                self.state_store.append_event("listening_stop_pending", timeout_sec=2.0)
+        if self.listen_task is not None and self.listen_task.done():
+            self.listen_task = None
+        if self.listen_task is None:
+            self.listen_stop_event = None
+        return state
+
+    def _listener_still_stopping(self) -> bool:
+        return (
+            self.listen_task is not None
+            and not self.listen_task.done()
+            and self.listen_stop_event is not None
+            and self.listen_stop_event.is_set()
+        )
+
+    def _run_voice_turn(self, stop_event: threading.Event, overrides: dict[str, Any]):
+        config = self.config.with_overrides(overrides)
+        return self._voice_pipeline(send=True, config=config).run_once(MicCapture(config, stop_event=stop_event).frames())
 
     def _run_voice_turn_from_wav(self, wav_path: Path, send: bool, overrides: dict[str, Any] | None = None):
         config = self.config.with_overrides(overrides)

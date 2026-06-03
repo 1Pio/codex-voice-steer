@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import Config
 from .audio import audio_readiness
-from .daemon import ensure_daemon, send_request
+from .daemon import ensure_daemon, send_request, stop_background
 from .vad import vad_readiness
 from .wake import wake_readiness
 
@@ -48,9 +48,9 @@ def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: in
         if mode != "jsonl" and mode != "quiet":
             print()
         try:
-            asyncio.run(send_request(config, {"command": "pause"}))
+            stop_background(config)
         except Exception as exc:
-            write_ui(config, "pause_failed", f"pause failed: {exc}", error=str(exc))
+            write_ui(config, "stop_failed", f"stop failed: {exc}", error=str(exc))
         write_ui(config, "stopped", "stopped")
         return 0
 
@@ -75,10 +75,8 @@ async def _run_foreground_listener(config: Config, poll_interval: float, max_pol
                 return 1
             events = list(status.get("state", {}).get("events", []))
             new_events = _events_after(events, last_seen_ts)
-            for event in new_events:
-                rendered = render_event(event, config)
-                if rendered:
-                    write_ui(config, str(event.get("event", "event")), rendered, source_event=event)
+            for event, rendered in render_events(new_events, config):
+                write_ui(config, str(event.get("event", "event")), rendered, source_event=event)
             if new_events:
                 last_seen_ts = _last_event_ts(new_events)
             polls += 1
@@ -142,6 +140,26 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
             return ""
         return "codex: " + str(event.get("delta", "")).strip()
     return ""
+
+
+def render_events(events: list[dict[str, Any]], config: Config | None = None) -> list[tuple[dict[str, Any], str]]:
+    user_final_texts = {
+        _normalized_event_text(event.get("text", ""))
+        for event in events
+        if str(event.get("event", "")) == "user_final"
+    }
+    rendered_events: list[tuple[dict[str, Any], str]] = []
+    for event in events:
+        if str(event.get("event", "")) == "stt_final" and _normalized_event_text(event.get("transcript", "")) in user_final_texts:
+            continue
+        rendered = render_event(event, config)
+        if rendered:
+            rendered_events.append((event, rendered))
+    return rendered_events
+
+
+def _normalized_event_text(value: object) -> str:
+    return " ".join(str(value).strip().split())
 
 
 def write_ui(config: Config, event: str, message: str, **fields: object) -> None:

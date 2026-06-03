@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
+import time
 from types import SimpleNamespace
 
 from codex_voice_steer import daemon
@@ -85,7 +87,7 @@ def test_daemon_records_listen_and_pause_events(tmp_path, monkeypatch) -> None:
     )
     cxv = CxvDaemon(config)
     monkeypatch.setattr(cxv, "_listen_blockers", lambda: [])
-    monkeypatch.setattr(cxv, "_listen_loop", lambda: asyncio.sleep(3600))
+    monkeypatch.setattr(cxv, "_listen_loop", lambda *_args: asyncio.sleep(0))
 
     async def run() -> list[str]:
         await cxv._dispatch({"command": "listen"})
@@ -93,6 +95,69 @@ def test_daemon_records_listen_and_pause_events(tmp_path, monkeypatch) -> None:
         return [str(event["event"]) for event in cxv.state_store.load().events or []]
 
     assert asyncio.run(run())[-2:] == ["listening_started", "listening_paused"]
+
+
+def test_daemon_pause_stops_listener_worker_cooperatively(tmp_path, monkeypatch) -> None:
+    config = load_config(
+        overrides={
+            "server": {
+                "socket_path": str(tmp_path / "cxv.sock"),
+                "pid_path": str(tmp_path / "cxv.pid"),
+                "state_db": str(tmp_path / "state.json"),
+            },
+        },
+        path=tmp_path / "missing.toml",
+    )
+    cxv = CxvDaemon(config)
+    started = threading.Event()
+    stopped = threading.Event()
+    monkeypatch.setattr(cxv, "_listen_blockers", lambda: [])
+
+    def fake_run_voice_turn(stop_event, _overrides):
+        started.set()
+        while not stop_event.is_set():
+            time.sleep(0.001)
+        stopped.set()
+        return SimpleNamespace(status="no_input", transcript="", wav_path="", reason="stopped")
+
+    monkeypatch.setattr(cxv, "_run_voice_turn", fake_run_voice_turn)
+
+    async def run() -> list[str]:
+        await cxv._dispatch({"command": "listen"})
+        assert await asyncio.to_thread(started.wait, 1.0)
+        await cxv._dispatch({"command": "pause"})
+        assert await asyncio.to_thread(stopped.wait, 1.0)
+        return [str(event["event"]) for event in cxv.state_store.load().events or []]
+
+    events = asyncio.run(run())
+    assert events[-1] == "listening_paused"
+    assert "voice_turn" not in events
+    assert cxv.listen_task is None
+    assert cxv.listen_stop_event is None
+
+
+def test_daemon_refuses_new_listener_while_previous_worker_is_stopping(tmp_path, monkeypatch) -> None:
+    config = load_config(overrides={"server": {"state_db": str(tmp_path / "state.json")}}, path=tmp_path / "missing.toml")
+    cxv = CxvDaemon(config)
+    stop_event = threading.Event()
+
+    async def never_done() -> None:
+        await asyncio.sleep(3600)
+
+    async def run() -> dict:
+        cxv.listen_task = asyncio.create_task(never_done())
+        cxv.listen_stop_event = stop_event
+        stop_event.set()
+        monkeypatch.setattr(cxv, "_listen_blockers", lambda: [])
+        try:
+            return await cxv._dispatch({"command": "listen"})
+        finally:
+            cxv.listen_task.cancel()
+
+    response = asyncio.run(run())
+    assert response["ok"] is False
+    assert "still stopping" in response["blockers"][0]
+    assert cxv.state_store.load().listening is False
 
 
 def test_daemon_reuses_live_wake_detector_for_same_config(tmp_path, monkeypatch) -> None:

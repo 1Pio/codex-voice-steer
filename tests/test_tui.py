@@ -5,7 +5,7 @@ import types
 
 from codex_voice_steer.config import load_config
 from codex_voice_steer import tui
-from codex_voice_steer.tui import _events_after, _last_event_ts, render_event, write_ui
+from codex_voice_steer.tui import _events_after, _last_event_ts, render_event, render_events, write_ui
 
 
 def test_tui_renders_voice_events() -> None:
@@ -13,6 +13,18 @@ def test_tui_renders_voice_events() -> None:
     assert render_event({"event": "vad_final", "wav_path": "/tmp/cxv.wav"}) == "vad final: /tmp/cxv.wav"
     assert render_event({"event": "stt_final", "transcript": "check status now"}) == "user: check status now"
     assert render_event({"event": "sent", "action": "turn/start"}) == "sent: turn/start"
+
+
+def test_tui_suppresses_duplicate_stt_final_when_user_final_is_present() -> None:
+    rendered = render_events(
+        [
+            {"event": "stt_final", "transcript": " Scarlet. "},
+            {"event": "user_final", "text": "Scarlet."},
+            {"event": "sent", "action": "turn/start"},
+        ]
+    )
+
+    assert [line for _event, line in rendered] == ["user: Scarlet.", "sent: turn/start"]
 
 
 def test_tui_honors_visibility_toggles(tmp_path) -> None:
@@ -84,3 +96,26 @@ def test_foreground_listener_handles_daemon_loss(tmp_path, monkeypatch, capsys) 
 
     assert result == 1
     assert '"event": "daemon_lost"' in capsys.readouterr().out
+
+
+def test_foreground_ctrl_c_stops_background_daemon(tmp_path, monkeypatch, capsys) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    stopped = {}
+
+    def fake_audio_readiness(_config, probe_stream=False):
+        return types.SimpleNamespace(ok=True, reason="ok")
+
+    def fake_asyncio_run(coro):
+        coro.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tui, "audio_readiness", fake_audio_readiness)
+    monkeypatch.setattr(tui, "vad_readiness", lambda: types.SimpleNamespace(ok=True, reason="ok"))
+    monkeypatch.setattr(tui, "wake_readiness", lambda _config: types.SimpleNamespace(ok=True, reason="ok"))
+    monkeypatch.setattr(tui.asyncio, "run", fake_asyncio_run)
+    monkeypatch.setattr(tui, "stop_background", lambda _config: stopped.setdefault("called", True))
+    monkeypatch.setattr(tui, "send_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pause should not be sent")))
+
+    assert tui.run_foreground_tui(cfg) == 0
+    assert stopped["called"] is True
+    assert "stopped" in capsys.readouterr().out

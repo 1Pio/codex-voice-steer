@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import math
 import struct
+import threading
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -277,12 +278,13 @@ def _probe_input_stream(config: Config | None, device) -> None:
 
 
 class MicCapture:
-    def __init__(self, config: Config, chunk_ms: int = 80) -> None:
+    def __init__(self, config: Config, chunk_ms: int = 80, stop_event: threading.Event | None = None) -> None:
         self.sample_rate = int(config.get("audio.sample_rate", 16000))
         self.channels = int(config.get("audio.channels", 1))
         self.device = _device_arg(str(config.get("audio.device", "default")))
         self.blocksize = int(self.sample_rate * chunk_ms / 1000)
         self.gain_db = float(config.get("audio.input_gain_db", 0.0))
+        self.stop_event = stop_event
 
     def frames(self) -> Iterator[AudioFrame]:
         import sounddevice as sd
@@ -294,8 +296,10 @@ class MicCapture:
             channels=self.channels,
             dtype="int16",
         ) as stream:
-            while True:
+            while self.stop_event is None or not self.stop_event.is_set():
                 data, _overflowed = stream.read(self.blocksize)
+                if self.stop_event is not None and self.stop_event.is_set():
+                    break
                 yield AudioFrame(pcm16=apply_gain_pcm16(bytes(data), self.gain_db)["pcm16"], sample_rate=self.sample_rate, channels=self.channels)
 
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import threading
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -132,6 +135,55 @@ def test_turn_notifications_accept_nested_turn_ids(tmp_path) -> None:
     events = store.load().events or []
     assert events[-1]["turn_id"] == "turn_nested"
     assert store.load().active_turn_id == ""
+
+
+def test_agent_message_delta_accepts_current_item_notification(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/agentMessage/delta",
+        {"threadId": "thread_1", "turnId": "turn_1", "itemId": "item_1", "delta": "working"},
+    )
+
+    events = store.load().events or []
+    assert events[-1]["event"] == "codex_visible_delta"
+    assert events[-1]["thread_id"] == "thread_1"
+    assert events[-1]["turn_id"] == "turn_1"
+    assert events[-1]["delta"] == "working"
+
+
+def test_request_waits_on_condition_until_response_arrives(tmp_path) -> None:
+    class FakeStdin:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+            self.written = threading.Event()
+
+        def write(self, line: str) -> None:
+            self.lines.append(line)
+            self.written.set()
+
+        def flush(self) -> None:
+            return None
+
+    cfg = load_config(path=tmp_path / "missing.toml")
+    bridge = CodexAppServer(cfg)
+    stdin = FakeStdin()
+    bridge.proc = SimpleNamespace(stdin=stdin)
+    result: dict[str, Any] = {}
+
+    thread = threading.Thread(target=lambda: result.update(bridge.request("ping", {"ok": True})))
+    thread.start()
+    assert stdin.written.wait(1.0)
+    assert thread.is_alive()
+    request_id = json.loads(stdin.lines[0])["id"]
+    with bridge._condition:
+        bridge._pending[request_id] = {"id": request_id, "result": {"pong": True}}
+        bridge._condition.notify_all()
+    thread.join(1.0)
+
+    assert result == {"pong": True}
 
 
 def test_stale_turn_completed_notification_does_not_clear_new_active_turn(tmp_path) -> None:
