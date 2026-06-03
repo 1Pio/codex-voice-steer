@@ -8,15 +8,25 @@ models/wake/scarlett.onnx
 
 Current receipt:
 
-- `models/wake/scarlett.onnx` is a real LiveKit-trained ONNX classifier exported outside the V1 runtime environment.
+- `models/wake/scarlett.onnx` is candidate15 from the 2026-06-03 LiveKit training run, exported outside the V1 runtime environment.
 - V1 runtime still uses OpenWakeWord. LiveKit is external training/evaluation tooling only.
 - The model is also packaged under `codex_voice_steer/resources/wake/scarlett.onnx` so an installed PATH `cxv` can load it outside the repo.
 - `cxv wake test-audio` verifies controlled 16 kHz mono PCM16 WAV fixtures through the same OpenWakeWord adapter.
-- Current LiveKit eval after rerunning with fixed background/RIR paths: FPPH 0.0, recall 0.99, accuracy 0.995, threshold 0.5, optimal threshold 0.07, optimal recall 1.0, optimal FPPH 0.1681, validation hours 17.85.
-- Current direct fixture smoke with default `wake.sensitivity = 0.5`: positive fixture max 0.5364097356796265 hit true; negative fixture max 0.010954856872558594 hit false.
-- `cxv doctor` passes with the packaged Scarlett model in the installed tool environment.
+- SHA-256: `c07cf631660e73ef355c6fc3e941dbd472f8ba80e7c5dfb899aaf69f52c4191e`
+- Fresh deterministic reset-safe score receipts with `--model models/wake/scarlett.onnx` and threshold `0.5`:
+  - `/Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/output/final-repo-candidate15-real-threshold-05-deterministic.jsonl`
+  - `/Users/main/Documents/cxv-wake-samples/scarlett-real-v1`: `216/219` positives, `10/82` negative false hits, `0/60` noise false hits.
+  - `/Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/output/final-repo-candidate15-synthetic-threshold-05-deterministic.jsonl`
+  - `/Users/main/Documents/cxv-wake-samples/scarlett-synthetic-negatives-v1`: `0/500` negative false hits.
+- This is not a perfect model. Candidate12, 15, and 17-21 were preserved under `/Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/output/scarlett-candidate*`; candidate15 remains the best high-recall anchor.
 
-Earlier training skipped standalone background/RIR augmentation because LiveKit defaulted those paths relative to `./data`. `tools/livekit-wakeword/scarlett.yaml` now pins `/private/tmp/cxv-livekit-wakeword-data/backgrounds` and `/private/tmp/cxv-livekit-wakeword-data/rirs`; the current model was exported after that corrected rerun.
+Earlier training skipped standalone background/RIR augmentation because LiveKit defaulted those paths relative to `./data`. `tools/livekit-wakeword/scarlett.yaml` now pins durable cache paths under `/Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/data`; the current model was exported after that corrected rerun.
+
+Known sample blockers:
+
+- `positive_20260602T140227_0154_voice.wav` scores near zero across candidates and transcribes like "That's it", so treating it as a true wake positive forces a bad model tradeoff.
+- `positive_20260602T140016_0112_voice.wav` remains low even after targeted positive-miss repeat training.
+- Hard negatives such as `negative_20260602T143731_0035_hard_negative.wav` contain repeated near-wake words and remain realistic collisions.
 
 Historical local openWakeWord training blocker:
 

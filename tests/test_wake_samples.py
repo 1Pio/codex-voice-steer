@@ -11,6 +11,7 @@ from codex_voice_steer.config import load_config
 from codex_voice_steer.segment import AudioFrame
 from codex_voice_steer.wake_samples import (
     capture_take,
+    generate_synthetic_msd_samples,
     init_dataset,
     normalize_key,
     prompts_for_args,
@@ -19,6 +20,7 @@ from codex_voice_steer.wake_samples import (
     safe_slug,
     score_dataset,
     summarize_dataset,
+    validate_synthetic_negative_prompts,
 )
 
 
@@ -214,6 +216,88 @@ def test_score_dataset_appends_score_receipts_and_summarizes_hits(tmp_path, monk
     assert len(receipts) == 3
     assert receipts[0]["path"].startswith("positive/")
     assert receipts[0]["model"] == "models/wake/scarlett.onnx"
+
+
+def test_score_dataset_can_skip_receipts(tmp_path, monkeypatch) -> None:
+    dataset = tmp_path / "samples"
+    init_dataset(dataset)
+    path = dataset / "negative" / "negative_20260531T171522_0001_test.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes((1000).to_bytes(2, "little", signed=True) * 1280)
+
+    monkeypatch.setattr(
+        wake_samples,
+        "score_wake_audio",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            hit=False,
+            to_dict=lambda: {
+                "wav_path": str(path),
+                "hit": False,
+                "max_score": 0.1,
+                "threshold": 0.5,
+            },
+        ),
+    )
+
+    summary = score_dataset(load_config(path=tmp_path / "missing.toml"), dataset, threshold=0.5, write_receipts=False)
+
+    assert summary.receipt_written is False
+    assert not (dataset / "scores.jsonl").exists()
+    assert "receipts: disabled" in render_score_summary(summary)
+
+
+def test_synthetic_msd_generation_writes_negative_wavs_and_metadata(tmp_path) -> None:
+    def fake_runner(command, **kwargs):
+        assert command[:2] == ["msd", "render"]
+        assert kwargs["check"] is True
+        output = command[command.index("--output") + 1]
+        with wave.open(output, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes((1200).to_bytes(2, "little", signed=True) * 1600)
+        return SimpleNamespace(returncode=0)
+
+    summary = generate_synthetic_msd_samples(
+        tmp_path / "synthetic",
+        prompts=["starlet", "hey Charlotte"],
+        count=3,
+        tag="synthetic-hard-negative",
+        voices=["Aiden", "Ryan"],
+        languages=["English"],
+        instructs=["neutral", "fast"],
+        speed=1.1,
+        runner=fake_runner,
+    )
+
+    assert summary.generated_count == 3
+    wavs = sorted((tmp_path / "synthetic" / "negative").glob("*.wav"))
+    assert len(wavs) == 3
+    with wave.open(str(wavs[0]), "rb") as wav:
+        assert wav.getframerate() == 16000
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+    records = [json.loads(line) for line in (tmp_path / "synthetic" / "metadata.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert records[0]["label"] == "negative"
+    assert records[0]["tag"] == "synthetic-hard-negative"
+    assert records[0]["synthetic"] is True
+    assert records[0]["generator"] == "msd"
+    assert records[0]["voice"] == "Aiden"
+    assert records[0]["language"] == "English"
+    assert records[0]["instruct"] == "neutral"
+    assert records[0]["speed"] == 1.1
+    assert records[0]["command"] == "wake samples synthetic-msd"
+    assert records[1]["voice"] == "Ryan"
+
+
+def test_synthetic_negative_prompts_reject_exact_wake_words() -> None:
+    with pytest.raises(ValueError, match="blocked wake word"):
+        validate_synthetic_negative_prompts(["that color is scarlet"])
+    with pytest.raises(ValueError, match="blocked wake word"):
+        validate_synthetic_negative_prompts(["hey Scarlett"])
 
 
 def test_prompt_and_name_helpers(tmp_path) -> None:

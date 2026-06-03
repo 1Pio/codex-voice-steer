@@ -1,0 +1,21 @@
+# Multilingual normal negatives. Keep exact wake-word tokens out.
+bitte oeffne den browser
+zeige mir den kalender
+starte eine neue notiz
+kopiere diesen befehl
+suche auf der seite
+mach das bitte kuerzer
+ouvre le navigateur
+montre moi le calendrier
+copie cette commande
+cherche dans cette page
+resume le paragraphe
+continue a partir dici
+abre el navegador
+muestra el calendario
+copia ese comando
+busca en la pagina
+hazlo mas corto
+continua desde aqui
+guarda el archivo actual
+lee el primer parrafo

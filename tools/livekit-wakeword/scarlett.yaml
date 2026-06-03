@@ -3,16 +3,52 @@ model_name: scarlett
 target_phrases:
   - "scarlett"
 
-data_dir: /private/tmp/cxv-livekit-wakeword-data
-output_dir: /private/tmp/cxv-livekit-wakeword-output
+data_dir: /Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/data
+output_dir: /Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/output
 
-n_samples: 10000
+n_samples: 3000
+n_samples_val: 600
+n_background_samples: 500
+n_background_samples_val: 100
+tts_batch_size: 50
+
+custom_negative_phrases:
+  - "starlet"
+  - "skeleton"
+  - "Charlotte"
+  - "scarlet fever"
+  - "scarlets fever"
+  - "scarlet letter"
+  - "star lit"
+  - "start it"
+  - "scale it"
+  - "scroll it"
+  - "let"
+  - "open the browser"
+  - "check the last message"
+  - "show me the calendar"
+  - "start a new note"
+  - "find the downloads folder"
+  - "what time is the meeting"
+  - "move this to tomorrow"
+  - "run the quick test"
+  - "pause for a moment"
+  - "copy that command"
+  - "continue from here"
+  - "read the first paragraph"
+  - "bitte oeffne den browser"
+  - "zeige mir den kalender"
+  - "ouvre le navigateur"
+  - "cherche dans la page"
+  - "abre el navegador"
+  - "busca en la pagina"
 
 augmentation:
+  rounds: 1
   background_paths:
-    - /private/tmp/cxv-livekit-wakeword-data/backgrounds
+    - /Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/data/backgrounds
   rir_paths:
-    - /private/tmp/cxv-livekit-wakeword-data/rirs
+    - /Users/main/Documents/cxv-wake-samples/livekit-wakeword-cache-v1/data/rirs
 
 model:
   model_type: conv_attention
@@ -20,3 +56,7 @@ model:
 
 steps: 50000
 target_fp_per_hour: 0.2
+batch_n_per_class:
+  positive: 64
+  adversarial_negative: 64
+  background_noise: 64

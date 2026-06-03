@@ -1,0 +1,27 @@
+# Near-miss negatives for Scarlett wake-word augmentation.
+# Do not include exact "scarlett" or exact "scarlet" tokens in this file.
+starlet
+Charlotte
+hey Charlotte
+ok Charlotte
+start it
+please start it
+let's start
+start that
+scale it
+please scale it
+scroll it
+please scroll it
+skillet
+let
+red letter
+the letter is red
+that color is crimson
+set a reminder
+start recording
+scroll to the top
+scroll to the next result
+scale the window down
+charlotte please
+hey charlotte can you help
+okay charlotte start now

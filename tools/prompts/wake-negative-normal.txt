@@ -1,0 +1,26 @@
+# Ordinary short commands and speech with no wake-word token.
+open the browser
+check the last message
+show me the calendar
+start a new note
+find the downloads folder
+what time is the meeting
+move this to tomorrow
+search the current page
+copy that command
+paste the address
+make this shorter
+summarize the thread
+turn the volume down
+open the terminal
+run the quick test
+pause for a moment
+save the current file
+switch to the next tab
+close this window
+read the first paragraph
+write a short reply
+show recent commits
+check the config
+look for errors
+continue from here

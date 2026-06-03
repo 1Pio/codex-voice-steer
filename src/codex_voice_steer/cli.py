@@ -20,16 +20,23 @@ from .models import render_models
 from .tui import run_foreground_tui
 from .wake import score_wake_audio
 from .wake_samples import (
+    DEFAULT_SYNTHETIC_MSD_INSTRUCTS,
+    DEFAULT_SYNTHETIC_MSD_LANGUAGES,
+    DEFAULT_SYNTHETIC_MSD_VOICES,
     HARD_NEGATIVE_PROMPTS,
     ENVIRONMENTAL_NEGATIVE_PROMPTS,
     capture_take,
+    generate_synthetic_msd_samples,
     init_dataset,
     next_take_index,
     prompts_for_args,
+    read_prompts_file,
     render_dataset_summary,
     render_score_summary,
+    render_synthetic_msd_summary,
     score_dataset,
     summarize_dataset,
+    split_csv_values,
 )
 from .wake_training import render_wake_training_checks, wake_training_checks
 
@@ -129,7 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     wake = sub.add_parser("wake", help="Wake-model utilities and readiness checks.")
     wake_sub = wake.add_subparsers(dest="wake_command", required=True)
-    wake_sub.add_parser("training-status", help="Check local Scarlett wake-model training prerequisites.")
+    training_status = wake_sub.add_parser("training-status", help="Check local Scarlett wake-model training prerequisites.")
+    training_status.add_argument(
+        "--python",
+        dest="training_python",
+        help="Training venv Python; defaults to CXV_WAKE_TRAINING_PYTHON or the durable wakeword cache venv.",
+    )
     test_audio = wake_sub.add_parser("test-audio", help="Score a 16 kHz mono PCM16 WAV through the wake detector.")
     test_audio.add_argument("wav", help="Path to the WAV file to score.")
     test_audio.add_argument("--threshold", type=float, default=None, help="Override wake threshold for this test.")
@@ -158,10 +170,32 @@ def build_parser() -> argparse.ArgumentParser:
     samples_list.add_argument("--json", action="store_true", help="Print summary as JSON.")
     samples_score = samples_sub.add_parser("score", help="Score sample WAVs through the current OpenWakeWord adapter.")
     samples_score.add_argument("dir", help="Dataset directory.")
-    samples_score.add_argument("--model", default=None, help="Wake model path, default models/wake/scarlett.onnx.")
+    samples_score.add_argument(
+        "--model",
+        default=None,
+        help="Wake model path; defaults to configured wake.model_path, falling back to models/wake/scarlett.onnx.",
+    )
     samples_score.add_argument("--threshold", type=float, default=None, help="Override wake threshold.")
     samples_score.add_argument("--label", choices=["positive", "negative", "noise"], default=None, help="Score only one label folder.")
+    samples_score.add_argument("--no-receipt", action="store_true", help="Do not append scores.jsonl; useful for read-only evaluation of manual datasets.")
+    samples_score.add_argument("--scores-path", default=None, help="Append score receipts to this JSONL path instead of the dataset scores.jsonl.")
     samples_score.add_argument("--json", action="store_true", help="Print score summary as JSON.")
+    samples_synthetic = samples_sub.add_parser("synthetic-msd", help="Generate optional synthetic negative wake samples with msd render.")
+    samples_synthetic.add_argument("dir", help="Synthetic dataset directory.")
+    samples_synthetic.add_argument("--prompts", action="append", required=True, help="Prompt file with one negative prompt per line; may be repeated.")
+    samples_synthetic.add_argument("--tag", default="synthetic-negative", help="Tag written to filenames and metadata.")
+    samples_synthetic.add_argument("--count", type=int, required=True, help="Number of synthetic negative samples to generate.")
+    samples_synthetic.add_argument("--voices", default=",".join(DEFAULT_SYNTHETIC_MSD_VOICES), help="Comma-separated msd voices.")
+    samples_synthetic.add_argument("--languages", default=",".join(DEFAULT_SYNTHETIC_MSD_LANGUAGES), help="Comma-separated language/style labels passed to msd.")
+    samples_synthetic.add_argument("--instructs", nargs="+", default=DEFAULT_SYNTHETIC_MSD_INSTRUCTS, help="One or more msd --instruct strings.")
+    samples_synthetic.add_argument("--model", default="", help="Optional msd model alias or Hugging Face model id.")
+    samples_synthetic.add_argument("--speed", type=float, default=None, help="Optional msd speed hint.")
+    samples_synthetic.add_argument("--ttl", type=float, default=None, help="Optional msd daemon ttl hint.")
+    samples_synthetic.add_argument("--msd-bin", default="msd", help="msd executable path.")
+    samples_synthetic.add_argument("--converter", default=None, help="Optional ffmpeg or sox executable for WAV normalization.")
+    samples_synthetic.add_argument("--progress-every", type=int, default=25, help="Print progress every N generated samples; 0 disables progress.")
+    samples_synthetic.add_argument("--dry-run", action="store_true", help="Validate and summarize the generation plan without writing files.")
+    samples_synthetic.add_argument("--json", action="store_true", help="Print summary as JSON.")
 
     voice = sub.add_parser("voice", help="Controlled full-pipeline voice test utilities.")
     voice_sub = voice.add_subparsers(dest="voice_command", required=True)
@@ -467,7 +501,7 @@ def _render_audio_devices(devices, kind: str = "input") -> str:
 
 def _wake_command(args: argparse.Namespace, config: Config) -> int:
     if args.wake_command == "training-status":
-        checks = wake_training_checks()
+        checks = wake_training_checks(python=args.training_python)
         print(render_wake_training_checks(checks))
         return 0 if all(check.ok for check in checks) else 1
     if args.wake_command == "test-audio":
@@ -591,11 +625,50 @@ def _wake_samples_command(args: argparse.Namespace, config: Config) -> int:
             print(render_dataset_summary(summary))
         return 0
     if args.samples_command == "score":
-        summary = score_dataset(config, dataset_dir, model=args.model, threshold=args.threshold, label=args.label)
+        summary = score_dataset(
+            config,
+            dataset_dir,
+            model=args.model,
+            threshold=args.threshold,
+            label=args.label,
+            write_receipts=not bool(args.no_receipt),
+            scores_path=Path(args.scores_path) if args.scores_path else None,
+        )
         if args.json:
             print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
         else:
             print(render_score_summary(summary))
+        return 0
+    if args.samples_command == "synthetic-msd":
+        prompts: list[str] = []
+        for prompts_file in args.prompts:
+            prompts.extend(read_prompts_file(Path(prompts_file)))
+        progress_every = max(0, int(args.progress_every))
+
+        def status(done: int, total: int, path: Path) -> None:
+            if progress_every and (done == 1 or done == total or done % progress_every == 0):
+                print(f"generated {done}/{total}: {path}", flush=True)
+
+        summary = generate_synthetic_msd_samples(
+            dataset_dir,
+            prompts=prompts,
+            count=int(args.count),
+            tag=str(args.tag),
+            voices=split_csv_values(str(args.voices)),
+            languages=split_csv_values(str(args.languages)),
+            instructs=[str(item).strip() for item in args.instructs if str(item).strip()],
+            model=str(args.model),
+            speed=args.speed,
+            ttl=args.ttl,
+            msd_bin=str(args.msd_bin),
+            converter=args.converter,
+            dry_run=bool(args.dry_run),
+            status=None if args.json else status,
+        )
+        if args.json:
+            print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(render_synthetic_msd_summary(summary))
         return 0
     raise ValueError(f"unknown wake samples command: {args.samples_command}")
 

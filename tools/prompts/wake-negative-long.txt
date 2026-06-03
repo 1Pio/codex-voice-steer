@@ -1,0 +1,11 @@
+# Longer natural negatives for non-wake frames.
+I was looking at the notes from yesterday and I think the next step is to compare the recent changes before running anything else.
+Please check the folder with the exported files, read the newest report, and tell me which items still need manual review.
+The meeting moved again, so I need a short summary of what changed and a clean message I can send without extra context.
+When this command finishes, inspect the log carefully and separate the real error from warnings that are already expected.
+I want to keep the current setup local and simple, with no background services unless I explicitly start them myself.
+Open the project, find the configuration path, and verify the exact value before suggesting any change.
+The audio sample sounds quiet but usable, so mark the level issue and keep the clip unless the file is actually corrupted.
+Before editing the document, read the source note and preserve the structure because the outline is already better than a rewrite.
+This is a normal spoken paragraph with several ordinary words, pauses, and instructions, but no wake phrase or assistant name.
+After the test run, collect the receipt, update the scratchpad briefly, and continue to the next small verified slice.

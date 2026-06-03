@@ -28,9 +28,10 @@ def test_bind_parses_thread_and_cwd() -> None:
 
 
 def test_wake_training_status_parses() -> None:
-    args = build_parser().parse_args(["wake", "training-status"])
+    args = build_parser().parse_args(["wake", "training-status", "--python", "/tmp/train/bin/python"])
     assert args.command == "wake"
     assert args.wake_command == "training-status"
+    assert args.training_python == "/tmp/train/bin/python"
 
 
 def test_wake_test_audio_parses() -> None:
@@ -100,7 +101,57 @@ def test_wake_samples_commands_parse() -> None:
     )
     session = parser.parse_args(["wake", "samples", "session", "/tmp/samples", "--label", "negative", "--preset", "scarlett"])
     listing = parser.parse_args(["wake", "samples", "list", "/tmp/samples", "--json"])
-    score = parser.parse_args(["wake", "samples", "score", "/tmp/samples", "--model", "models/wake/scarlett.onnx", "--threshold", "0.4", "--label", "positive", "--json"])
+    score = parser.parse_args(
+        [
+            "wake",
+            "samples",
+            "score",
+            "/tmp/samples",
+            "--model",
+            "models/wake/scarlett.onnx",
+            "--threshold",
+            "0.4",
+            "--label",
+            "positive",
+            "--no-receipt",
+            "--scores-path",
+            "/tmp/scores.jsonl",
+            "--json",
+        ]
+    )
+    synthetic = parser.parse_args(
+        [
+            "wake",
+            "samples",
+            "synthetic-msd",
+            "/tmp/synthetic",
+            "--prompts",
+            "tools/prompts/wake-negative-hard.txt",
+            "--prompts",
+            "tools/prompts/wake-negative-normal.txt",
+            "--tag",
+            "synthetic-hard-negative",
+            "--count",
+            "300",
+            "--voices",
+            "Aiden,Ryan",
+            "--languages",
+            "English,German",
+            "--instructs",
+            "neutral",
+            "fast",
+            "--model",
+            "cv-test",
+            "--speed",
+            "1.05",
+            "--ttl",
+            "3",
+            "--progress-every",
+            "10",
+            "--dry-run",
+            "--json",
+        ]
+    )
 
     assert init.wake_command == "samples"
     assert init.samples_command == "init"
@@ -121,7 +172,23 @@ def test_wake_samples_commands_parse() -> None:
     assert score.model == "models/wake/scarlett.onnx"
     assert score.threshold == 0.4
     assert score.label == "positive"
+    assert score.no_receipt is True
+    assert score.scores_path == "/tmp/scores.jsonl"
     assert score.json is True
+    assert synthetic.samples_command == "synthetic-msd"
+    assert synthetic.dir == "/tmp/synthetic"
+    assert synthetic.prompts == ["tools/prompts/wake-negative-hard.txt", "tools/prompts/wake-negative-normal.txt"]
+    assert synthetic.tag == "synthetic-hard-negative"
+    assert synthetic.count == 300
+    assert synthetic.voices == "Aiden,Ryan"
+    assert synthetic.languages == "English,German"
+    assert synthetic.instructs == ["neutral", "fast"]
+    assert synthetic.model == "cv-test"
+    assert synthetic.speed == 1.05
+    assert synthetic.ttl == 3
+    assert synthetic.progress_every == 10
+    assert synthetic.dry_run is True
+    assert synthetic.json is True
 
 
 def test_voice_test_audio_parses() -> None:

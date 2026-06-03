@@ -5,6 +5,8 @@ import types
 import wave
 from importlib.machinery import ModuleSpec
 
+import numpy as np
+
 from codex_voice_steer.config import load_config
 from codex_voice_steer import wake
 from codex_voice_steer.wake import OpenWakeWordDetector, _openwakeword_feature_kwargs, score_wake_audio, wake_readiness
@@ -188,6 +190,76 @@ def test_wake_audio_scores_wav_frames(tmp_path, monkeypatch) -> None:
     assert result.rms > 0
     assert result.peak == 1
     assert result.to_dict()["max_score_time_sec"] == 0.08
+
+
+def test_wake_audio_resets_detector_around_independent_wav(tmp_path) -> None:
+    wav_path = tmp_path / "input.wav"
+    with wave.open(str(wav_path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(b"\0" * 1280 * 2)
+
+    class FakeDetector:
+        sensitivity = 0.5
+
+        def __init__(self) -> None:
+            self.resets = 0
+
+        def reset(self) -> None:
+            self.resets += 1
+
+        def score(self, _frame) -> float:
+            return 0.1
+
+    detector = FakeDetector()
+    result = score_wake_audio(load_config(path=tmp_path / "missing.toml"), wav_path, detector=detector)
+
+    assert result.hit is False
+    assert detector.resets == 2
+
+
+def test_wake_detector_reset_is_deterministic_and_preserves_numpy_rng(tmp_path, monkeypatch) -> None:
+    model_path = tmp_path / "scarlett.onnx"
+    model_path.write_bytes(b"fake")
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(f'[wake]\nmodel_path = "{model_path}"\n')
+
+    openwakeword = types.ModuleType("openwakeword")
+    openwakeword.__path__ = []
+    openwakeword.__spec__ = ModuleSpec("openwakeword", loader=None, is_package=True)
+    model_module = types.ModuleType("openwakeword.model")
+    model_module.__spec__ = ModuleSpec("openwakeword.model", loader=None)
+    seen = {"values": []}
+
+    class Model:
+        def __init__(self, wakeword_models, **_kwargs):
+            pass
+
+        def predict(self, frame):
+            return {"scarlett": 0.0}
+
+        def reset(self):
+            seen["values"].append(int(np.random.randint(0, 1_000_000)))
+
+    model_module.Model = Model
+    monkeypatch.setitem(sys.modules, "openwakeword", openwakeword)
+    monkeypatch.setitem(sys.modules, "openwakeword.model", model_module)
+
+    detector = OpenWakeWordDetector(load_config(path=cfg_path), repo_root=tmp_path)
+    saved_state = np.random.get_state()
+    np.random.seed(0)
+    expected_reset = int(np.random.randint(0, 1_000_000))
+    np.random.set_state(saved_state)
+    np.random.seed(123)
+    expected_next = int(np.random.randint(0, 1_000_000))
+    np.random.seed(123)
+
+    detector.reset()
+    detector.reset()
+
+    assert seen["values"] == [expected_reset, expected_reset]
+    assert int(np.random.randint(0, 1_000_000)) == expected_next
 
 
 def test_openwakeword_feature_kwargs_use_packaged_onnx_resources() -> None:

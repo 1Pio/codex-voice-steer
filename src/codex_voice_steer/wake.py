@@ -113,10 +113,23 @@ class OpenWakeWordDetector:
         scores = self.model.predict(pcm16_frame)
         return float(scores.get(self.word, 0.0))
 
+    def reset(self) -> None:
+        self._reset_model()
+
     def _reset_model(self) -> None:
         reset = getattr(self.model, "reset", None)
         if callable(reset):
-            reset()
+            try:
+                import numpy as np
+            except ImportError:
+                reset()
+                return
+            rng_state = np.random.get_state()
+            try:
+                np.random.seed(0)
+                reset()
+            finally:
+                np.random.set_state(rng_state)
 
 
 def _openwakeword_feature_kwargs() -> dict[str, str]:
@@ -137,6 +150,7 @@ def _packaged_openwakeword_model_path(name: str) -> Path:
 
 def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = None, detector: OpenWakeWordDetector | None = None) -> WakeAudioTest:
     detector = detector or OpenWakeWordDetector(config)
+    detector.reset()
     threshold = detector.sensitivity if threshold is None else threshold
     max_score = 0.0
     max_score_time_sec = 0.0
@@ -146,30 +160,33 @@ def score_wake_audio(config: Config, wav_path: Path, threshold: float | None = N
     peak = 0
     target_samples = int(int(config.get("audio.sample_rate", 16000)) * 80 / 1000)
 
-    with wave.open(str(wav_path), "rb") as wav:
-        channels = wav.getnchannels()
-        sample_width = wav.getsampwidth()
-        sample_rate = wav.getframerate()
-        if channels != 1 or sample_width != 2 or sample_rate != int(config.get("audio.sample_rate", 16000)):
-            raise ValueError(
-                "wake test audio must be 16 kHz mono PCM16 WAV "
-                f"(got {sample_rate} Hz, {channels} channel(s), {sample_width * 8}-bit)"
-            )
-        while True:
-            chunk = wav.readframes(target_samples)
-            if not chunk:
-                break
-            if len(chunk) < target_samples * 2:
-                chunk += b"\0" * (target_samples * 2 - len(chunk))
-            stats = pcm16_level_stats(chunk)
-            level_samples += int(stats["samples"])
-            sum_squares += float(stats["sum_squares"])
-            peak = max(peak, int(stats["peak"]))
-            score = detector.score(chunk)
-            if score > max_score:
-                max_score = score
-                max_score_time_sec = frame_count * target_samples / sample_rate
-            frame_count += 1
+    try:
+        with wave.open(str(wav_path), "rb") as wav:
+            channels = wav.getnchannels()
+            sample_width = wav.getsampwidth()
+            sample_rate = wav.getframerate()
+            if channels != 1 or sample_width != 2 or sample_rate != int(config.get("audio.sample_rate", 16000)):
+                raise ValueError(
+                    "wake test audio must be 16 kHz mono PCM16 WAV "
+                    f"(got {sample_rate} Hz, {channels} channel(s), {sample_width * 8}-bit)"
+                )
+            while True:
+                chunk = wav.readframes(target_samples)
+                if not chunk:
+                    break
+                if len(chunk) < target_samples * 2:
+                    chunk += b"\0" * (target_samples * 2 - len(chunk))
+                stats = pcm16_level_stats(chunk)
+                level_samples += int(stats["samples"])
+                sum_squares += float(stats["sum_squares"])
+                peak = max(peak, int(stats["peak"]))
+                score = detector.score(chunk)
+                if score > max_score:
+                    max_score = score
+                    max_score_time_sec = frame_count * target_samples / sample_rate
+                frame_count += 1
+    finally:
+        detector.reset()
     rms = math.sqrt(sum_squares / level_samples) if level_samples else 0.0
 
     return WakeAudioTest(
