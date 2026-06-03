@@ -35,6 +35,17 @@ def test_tui_honors_visibility_toggles(tmp_path) -> None:
     assert render_event({"event": "stt_final", "transcript": "hidden"}, cfg) == ""
 
 
+def test_tui_renders_codex_tool_progress_by_default(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == "codex action: command: git status"
+    assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == "codex progress: Downloading"
+
+
+def test_tui_can_hide_codex_tool_traces(tmp_path) -> None:
+    cfg = load_config(overrides={"ui": {"show_codex_tool_traces": False}}, path=tmp_path / "missing.toml")
+    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == ""
+
+
 def test_tui_jsonl_and_quiet_modes(capsys, tmp_path) -> None:
     jsonl_path = tmp_path / "jsonl.toml"
     jsonl_path.write_text('[ui]\nmode = "jsonl"\n')
@@ -96,6 +107,35 @@ def test_foreground_listener_handles_daemon_loss(tmp_path, monkeypatch, capsys) 
 
     assert result == 1
     assert '"event": "daemon_lost"' in capsys.readouterr().out
+
+
+def test_foreground_listener_sends_listen_overrides(tmp_path, monkeypatch) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    payloads = []
+
+    async def fake_ensure_daemon(_config):
+        return None
+
+    async def fake_send_request(_config, payload):
+        payloads.append(payload)
+        if payload["command"] == "status":
+            return {"ok": True, "state": {"events": []}}
+        return {"ok": True}
+
+    monkeypatch.setattr(tui, "ensure_daemon", fake_ensure_daemon)
+    monkeypatch.setattr(tui, "send_request", fake_send_request)
+
+    result = asyncio.run(
+        tui._run_foreground_listener(
+            cfg,
+            poll_interval=0,
+            max_polls=1,
+            listen_overrides={"codex": {"fast": True, "effort": "minimal"}},
+        )
+    )
+
+    assert result == 0
+    assert payloads[1] == {"command": "listen", "overrides": {"codex": {"fast": True, "effort": "minimal"}}}
 
 
 def test_foreground_ctrl_c_stops_background_daemon(tmp_path, monkeypatch, capsys) -> None:

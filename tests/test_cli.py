@@ -280,6 +280,12 @@ def test_daemon_payload_includes_cli_overrides() -> None:
     assert payload["overrides"] == {"codex": {"cwd": "/tmp/cxv-cwd", "model": "gpt-test"}}
 
 
+def test_daemon_payload_includes_latency_overrides() -> None:
+    args = build_parser().parse_args(["--fast", "--effort", "minimal", "listen"])
+    payload = _payload(args, "listen")
+    assert payload["overrides"] == {"codex": {"fast": True, "effort": "minimal"}}
+
+
 def test_ui_mode_flags_parse_as_overrides() -> None:
     jsonl = _payload(build_parser().parse_args(["--jsonl", "listen"]), "listen")
     quiet = _payload(build_parser().parse_args(["--quiet", "--show-partials", "listen"]), "listen")

@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(overrides)
     command = args.command
     if command is None:
-        return run_foreground_tui(config)
+        return run_foreground_tui(config, listen_overrides=overrides)
     try:
         return dispatch(args, config)
     except Exception as exc:
@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cwd", help="Override Codex working directory for this cxv invocation.")
     parser.add_argument("--agent", help="Override configured Codex custom agent name when native support exists.")
     parser.add_argument("--model", help="Override Codex model.")
+    parser.add_argument("--fast", action="store_true", help="Request Codex fast service tier for this invocation.")
+    parser.add_argument(
+        "--effort",
+        choices=["none", "minimal", "low", "medium", "high", "xhigh"],
+        help="Override Codex reasoning effort for this invocation.",
+    )
     parser.add_argument("--no-start", action="store_true", help="Do not autostart the daemon for commands that need it.")
     parser.add_argument("--jsonl", action="store_true", help="Emit foreground cxv events as JSON Lines.")
     parser.add_argument("--quiet", action="store_true", help="Suppress foreground cxv status/event output.")
@@ -705,6 +711,10 @@ def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
         codex["agent"] = args.agent
     if getattr(args, "model", None):
         codex["model"] = args.model
+    if getattr(args, "fast", False):
+        codex["fast"] = True
+    if getattr(args, "effort", None):
+        codex["effort"] = args.effort
     if getattr(args, "jsonl", False):
         ui["mode"] = "jsonl"
     if getattr(args, "quiet", False):

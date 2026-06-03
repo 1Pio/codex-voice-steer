@@ -134,6 +134,26 @@ class CodexAppServer:
                 turn_id=self._id_param(params, "turnId", "turn"),
                 delta=str(params.get("delta", "")),
             )
+        elif method == "item/started":
+            item = dict(params.get("item") or {})
+            summary = self._tool_item_summary(item)
+            if summary:
+                self.state_store.append_event(
+                    "codex_tool_started",
+                    thread_id=self._id_param(params, "threadId", "thread"),
+                    turn_id=self._id_param(params, "turnId", "turn"),
+                    item_id=str(item.get("id", "")),
+                    item_type=str(item.get("type", "")),
+                    summary=summary,
+                )
+        elif method == "item/mcpToolCall/progress":
+            self.state_store.append_event(
+                "codex_tool_progress",
+                thread_id=self._id_param(params, "threadId", "thread"),
+                turn_id=self._id_param(params, "turnId", "turn"),
+                item_id=str(params.get("itemId", "")),
+                message=str(params.get("message", "")),
+            )
         elif method == "turn/completed":
             state = self.state_store.load()
             turn_id = self._id_param(params, "turnId", "turn") or state.active_turn_id
@@ -157,6 +177,28 @@ class CodexAppServer:
         nested = params.get(nested_key)
         if isinstance(nested, dict) and nested.get("id"):
             return str(nested["id"])
+        return ""
+
+    @staticmethod
+    def _tool_item_summary(item: dict[str, Any]) -> str:
+        item_type = str(item.get("type", ""))
+        if item_type == "commandExecution":
+            command = " ".join(str(item.get("command", "")).split())
+            return _clip(f"command: {command}") if command else "command"
+        if item_type == "mcpToolCall":
+            server = str(item.get("server", "")).strip()
+            tool = str(item.get("tool", "")).strip()
+            name = ".".join(part for part in (server, tool) if part)
+            return _clip(f"tool: {name}") if name else "tool"
+        if item_type == "dynamicToolCall":
+            namespace = str(item.get("namespace", "") or "").strip()
+            tool = str(item.get("tool", "")).strip()
+            name = ".".join(part for part in (namespace, tool) if part)
+            return _clip(f"tool: {name}") if name else "tool"
+        if item_type == "fileChange":
+            changes = item.get("changes")
+            count = len(changes) if isinstance(changes, list) else 0
+            return f"file change: {count} update(s)" if count else "file change"
         return ""
 
     def ensure_thread(self, config: Config | None = None) -> str:
@@ -303,3 +345,10 @@ class CodexAppServer:
     @staticmethod
     def _permission_profile(config: Config) -> str:
         return str(config.get("codex.permission_profile", config.get("codex.permissions", ":workspace")))
+
+
+def _clip(value: str, limit: int = 120) -> str:
+    clean = " ".join(value.split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1] + "..."

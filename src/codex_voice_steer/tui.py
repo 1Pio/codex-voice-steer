@@ -18,7 +18,12 @@ def event_line(message: str, timestamps: bool = True) -> str:
     return f"{time.strftime('%H:%M:%S')}  {message}"
 
 
-def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: int | None = None) -> int:
+def run_foreground_tui(
+    config: Config,
+    poll_interval: float = 0.5,
+    max_polls: int | None = None,
+    listen_overrides: dict[str, Any] | None = None,
+) -> int:
     mode = str(config.get("ui.mode", "interactive"))
     if mode == "jsonl":
         emit_jsonl(
@@ -43,7 +48,7 @@ def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: in
     if mode != "jsonl" and mode != "quiet":
         print("Press Ctrl-C to stop.")
     try:
-        return asyncio.run(_run_foreground_listener(config, poll_interval=poll_interval, max_polls=max_polls))
+        return asyncio.run(_run_foreground_listener(config, poll_interval=poll_interval, max_polls=max_polls, listen_overrides=listen_overrides))
     except KeyboardInterrupt:
         if mode != "jsonl" and mode != "quiet":
             print()
@@ -55,11 +60,19 @@ def run_foreground_tui(config: Config, poll_interval: float = 0.5, max_polls: in
         return 0
 
 
-async def _run_foreground_listener(config: Config, poll_interval: float, max_polls: int | None) -> int:
+async def _run_foreground_listener(
+    config: Config,
+    poll_interval: float,
+    max_polls: int | None,
+    listen_overrides: dict[str, Any] | None = None,
+) -> int:
     await ensure_daemon(config)
     before = await send_request(config, {"command": "status"})
     last_seen_ts = _last_event_ts(before.get("state", {}).get("events", []))
-    response = await send_request(config, {"command": "listen"})
+    listen_payload: dict[str, Any] = {"command": "listen"}
+    if listen_overrides:
+        listen_payload["overrides"] = listen_overrides
+    response = await send_request(config, listen_payload)
     if not response.get("ok"):
         for blocker in response.get("blockers", []):
             write_ui(config, "blocked", f"blocked: {blocker}", blocker=blocker)
@@ -139,6 +152,14 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
         if config is not None and not config.get("ui.show_codex_visible_messages", True):
             return ""
         return "codex: " + str(event.get("delta", "")).strip()
+    if name == "codex_tool_started":
+        if config is not None and not config.get("ui.show_codex_tool_traces", True):
+            return ""
+        return "codex action: " + str(event.get("summary", "")).strip()
+    if name == "codex_tool_progress":
+        if config is not None and not config.get("ui.show_codex_tool_traces", True):
+            return ""
+        return "codex progress: " + str(event.get("message", "")).strip()
     return ""
 
 

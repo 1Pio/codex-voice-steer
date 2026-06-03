@@ -154,6 +154,40 @@ def test_agent_message_delta_accepts_current_item_notification(tmp_path) -> None
     assert events[-1]["delta"] == "working"
 
 
+def test_item_started_records_codex_tool_action(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/started",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "item": {"id": "item_1", "type": "commandExecution", "command": "git status --short"},
+        },
+    )
+
+    events = store.load().events or []
+    assert events[-1]["event"] == "codex_tool_started"
+    assert events[-1]["summary"] == "command: git status --short"
+
+
+def test_mcp_progress_records_codex_tool_progress(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/mcpToolCall/progress",
+        {"threadId": "thread_1", "turnId": "turn_1", "itemId": "item_1", "message": "Working"},
+    )
+
+    events = store.load().events or []
+    assert events[-1]["event"] == "codex_tool_progress"
+    assert events[-1]["message"] == "Working"
+
+
 def test_request_waits_on_condition_until_response_arrives(tmp_path) -> None:
     class FakeStdin:
         def __init__(self) -> None:

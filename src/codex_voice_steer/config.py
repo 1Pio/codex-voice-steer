@@ -30,7 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_partial_transcripts": False,
         "show_final_transcripts": True,
         "show_codex_visible_messages": True,
-        "show_codex_tool_traces": False,
+        "show_codex_tool_traces": True,
         "show_codex_reasoning": False,
         "show_status_line": True,
         "max_transcript_lines": 200,

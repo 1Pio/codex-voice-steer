@@ -23,6 +23,15 @@ cxv voice test-audio /path/to/full-turn.wav
 cxv voice test-audio /path/to/full-turn.wav --send
 ```
 
+Codex response latency is mostly model/turn execution time after speech has already been sent. To make that tradeoff explicit for voice use, use the fast service tier or lower reasoning effort per invocation:
+
+```bash
+cxv --fast --effort minimal
+cxv --fast --effort low text check status
+```
+
+`cxv` shows assistant text deltas and lightweight Codex action/progress events by default; set `ui.show_codex_tool_traces = false` to hide action traces.
+
 Wake sample collection for retraining/evaluation uses real microphone takes and keeps LiveKit out of runtime source:
 
 ```bash
