@@ -12,6 +12,26 @@ from codex_voice_steer.daemon import CxvDaemon, stop_background
 from codex_voice_steer.state import StateStore
 
 
+class FakeCodexBridge:
+    def __init__(self, store: StateStore) -> None:
+        self.store = store
+        self.interrupted = False
+
+    def interrupt(self):
+        self.interrupted = True
+        self.store.update(active_turn_id="")
+        return SimpleNamespace(action="turn/interrupt", thread_id="thread_old", turn_id="turn_active")
+
+    def start_new_thread(self, config):
+        return self.store.update(
+            thread_id="thread_new",
+            session_id="session_new",
+            cwd=str(config.get("codex.cwd", ".")),
+            active_turn_id="",
+            queued_inputs=[],
+        )
+
+
 def test_stop_clears_volatile_state_when_already_stopped(tmp_path) -> None:
     state_path = tmp_path / "state.json"
     cfg_path = tmp_path / "config.toml"
@@ -95,6 +115,53 @@ def test_daemon_records_listen_and_pause_events(tmp_path, monkeypatch) -> None:
         return [str(event["event"]) for event in cxv.state_store.load().events or []]
 
     assert asyncio.run(run())[-2:] == ["listening_started", "listening_paused"]
+
+
+def test_daemon_session_new_refuses_pinned_config_thread(tmp_path) -> None:
+    config = load_config(
+        overrides={"server": {"state_db": str(tmp_path / "state.json")}, "codex": {"thread_id": "thread_config"}},
+        path=tmp_path / "missing.toml",
+    )
+    cxv = CxvDaemon(config)
+
+    response = asyncio.run(cxv._dispatch({"command": "session-new"}))
+
+    assert response["ok"] is False
+    assert response["configured_thread_id"] == "thread_config"
+    assert "codex.thread_id" in response["error"]
+
+
+def test_daemon_session_new_refuses_active_turn_without_force(tmp_path) -> None:
+    config = load_config(overrides={"server": {"state_db": str(tmp_path / "state.json")}}, path=tmp_path / "missing.toml")
+    cxv = CxvDaemon(config)
+    cxv.state_store.update(thread_id="thread_old", session_id="session_old", active_turn_id="turn_active")
+
+    response = asyncio.run(cxv._dispatch({"command": "session-new"}))
+
+    assert response["ok"] is False
+    assert response["active_turn_id"] == "turn_active"
+    assert cxv.state_store.load().thread_id == "thread_old"
+
+
+def test_daemon_session_new_force_interrupts_and_saves_new_thread(tmp_path) -> None:
+    config = load_config(
+        overrides={"server": {"state_db": str(tmp_path / "state.json")}, "codex": {"cwd": "/tmp/new-cwd"}},
+        path=tmp_path / "missing.toml",
+    )
+    cxv = CxvDaemon(config)
+    fake = FakeCodexBridge(cxv.state_store)
+    cxv.codex = fake  # type: ignore[assignment]
+    cxv.state_store.update(thread_id="thread_old", session_id="session_old", active_turn_id="turn_active", queued_inputs=["old"])
+
+    response = asyncio.run(cxv._dispatch({"command": "session-new", "force": True}))
+
+    assert response["ok"] is True
+    assert fake.interrupted is True
+    state = cxv.state_store.load()
+    assert state.thread_id == "thread_new"
+    assert state.session_id == "session_new"
+    assert state.active_turn_id == ""
+    assert state.queued_inputs == []
 
 
 def test_daemon_pause_stops_listener_worker_cooperatively(tmp_path, monkeypatch) -> None:

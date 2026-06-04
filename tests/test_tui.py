@@ -197,7 +197,7 @@ def test_foreground_listener_sends_listen_overrides(tmp_path, monkeypatch) -> No
 
 
 def test_foreground_ctrl_c_stops_background_daemon(tmp_path, monkeypatch, capsys) -> None:
-    cfg = load_config(path=tmp_path / "missing.toml")
+    cfg = load_config(overrides={"server": {"state_db": str(tmp_path / "state.json")}}, path=tmp_path / "missing.toml")
     stopped = {}
 
     def fake_audio_readiness(_config, probe_stream=False):
@@ -216,4 +216,7 @@ def test_foreground_ctrl_c_stops_background_daemon(tmp_path, monkeypatch, capsys
 
     assert tui.run_foreground_tui(cfg) == 0
     assert stopped["called"] is True
-    assert "stopped" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "session: -" in out
+    assert "resume: new" in out
+    assert "stopped" in out

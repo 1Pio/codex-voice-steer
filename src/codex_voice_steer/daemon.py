@@ -16,6 +16,7 @@ from .codex_app_server import CodexAppServer
 from .config import Config, load_config
 from .audio import MicCapture, audio_readiness, wav_frames
 from .paths import expand_path
+from .session import configured_resume_thread_id
 from .state import StateStore
 from .stt import MacParakeetStt
 from .vad import SileroVad, vad_readiness
@@ -109,8 +110,16 @@ class CxvDaemon:
             state = await self._stop_listening(record_event=True)
             return {"ok": True, "state": state.to_dict()}
         if command == "bind":
-            state = self.state_store.update(thread_id=request.get("thread_id", ""), cwd=request.get("cwd", "."))
+            state = self.state_store.update(
+                thread_id=request.get("thread_id", ""),
+                session_id="",
+                cwd=request.get("cwd", "."),
+                active_turn_id="",
+                queued_inputs=[],
+            )
             return {"ok": True, "state": state.to_dict()}
+        if command == "session-new":
+            return await self._start_new_session(request)
         if command in {"text", "steer"}:
             config = self._effective_config(request)
             result = await asyncio.to_thread(self._codex().deliver_text, str(request.get("text", "")), command == "steer", config)
@@ -165,6 +174,33 @@ class CxvDaemon:
             self.codex = CodexAppServer(self.config, self.state_store)
             self.codex.start()
         return self.codex
+
+    async def _start_new_session(self, request: dict[str, Any]) -> dict[str, Any]:
+        config = self._effective_config(request)
+        configured_thread_id, configured_source = configured_resume_thread_id(config)
+        if configured_thread_id:
+            return {
+                "ok": False,
+                "error": f"{configured_source} is set; unset it before creating a reusable saved session",
+                "configured_thread_id": configured_thread_id,
+                "configured_source": configured_source,
+            }
+        state = self.state_store.load()
+        force = bool(request.get("force", False))
+        if state.active_turn_id and not force:
+            return {
+                "ok": False,
+                "error": "active turn is running; use --force to interrupt and start a new session",
+                "active_turn_id": state.active_turn_id,
+            }
+        if state.active_turn_id and force:
+            try:
+                await asyncio.to_thread(self._codex().interrupt)
+            except Exception as exc:
+                self.state_store.append_event("session_interrupt_failed", error=str(exc), turn_id=state.active_turn_id)
+        self.state_store.update(active_turn_id="", queued_inputs=[])
+        state = await asyncio.to_thread(self._codex().start_new_thread, config)
+        return {"ok": True, "state": state.to_dict()}
 
     def _listen_blockers(self) -> list[str]:
         checks = [

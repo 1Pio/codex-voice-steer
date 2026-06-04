@@ -9,6 +9,7 @@ from typing import Any
 from .config import Config
 from .audio import audio_readiness
 from .daemon import ensure_daemon, send_request, stop_background
+from .session import render_session_header, session_status_info
 from .vad import vad_readiness
 from .wake import wake_readiness
 
@@ -36,15 +37,23 @@ def run_foreground_tui(
 ) -> int:
     mode = str(config.get("ui.mode", "interactive"))
     if mode == "jsonl":
+        session_info = session_status_info(config)
         emit_jsonl(
             "ready",
             wake=config.get("wake.word", "scarlett"),
             stt=f"{config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}",
             codex="app-server",
+            session_id=session_info["saved_session_id"],
+            resume_thread_id=session_info["effective_resume_thread_id"],
+            resume_source=session_info["effective_resume_source"],
         )
     elif mode != "quiet":
         print("cxv 0.1.0  codex-voice-steer")
-        print(f"wake: {config.get('wake.word', 'scarlett')}     stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     codex: app-server")
+        print(
+            f"wake: {config.get('wake.word', 'scarlett')}     "
+            f"stt: {config.get('stt.engine', 'macparakeet')} {config.get('stt.mode', 'clean')}     "
+            f"codex: app-server     {render_session_header(config)}"
+        )
     blockers = []
     for readiness in (audio_readiness(config, probe_stream=True), vad_readiness(), wake_readiness(config)):
         if not readiness.ok:

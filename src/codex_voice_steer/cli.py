@@ -17,6 +17,7 @@ from .config import Config, load_config, set_config_value, unset_config_value, w
 from .daemon import ensure_daemon, is_running, run_serve, send_request, start_background, stop_background
 from .doctor import render_doctor, run_doctor
 from .models import render_models
+from .session import render_session_status, session_status_info
 from .tui import run_foreground_tui
 from .wake import score_wake_audio
 from .wake_samples import (
@@ -98,6 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
     bind = sub.add_parser("bind", help="Bind cxv to a Codex thread/session target.")
     bind.add_argument("--thread", default="", help="Codex thread id to resume/use.")
     bind.add_argument("--cwd", default=".", help="Working directory for future turns.")
+
+    session = sub.add_parser("session", help="Inspect or refresh the saved Codex session.")
+    session_sub = session.add_subparsers(dest="session_command", required=True)
+    session_status = session_sub.add_parser("status", help="Show the session/thread cxv will resume and related behavior.")
+    session_status.add_argument("--json", action="store_true", help="Print session status as JSON.")
+    session_new = session_sub.add_parser("new", help="Start a fresh Codex thread and save it for future turns.")
+    session_new.add_argument("--force", action="store_true", help="Interrupt an active turn if needed before starting the new session.")
+    session_new.add_argument("--json", action="store_true", help="Print the raw daemon response as JSON.")
 
     cfg = sub.add_parser("config", help="Manage ~/.config/codex-voice-steer/config.toml.")
     cfg_sub = cfg.add_subparsers(dest="config_command", required=True)
@@ -238,6 +247,8 @@ def dispatch(args: argparse.Namespace, config: Config) -> int:
         return 0
     if args.command == "status":
         return _status(args, config)
+    if args.command == "session":
+        return _session_command(args, config)
     if args.command in {"listen", "pause", "text", "ttt", "steer", "interrupt", "stop", "bind", "voice"}:
         return asyncio.run(_daemon_command(args, config))
     if args.command == "config":
@@ -301,6 +312,40 @@ def _status(args: argparse.Namespace, config: Config) -> int:
         print(json.dumps(response, indent=2, sort_keys=True))
     else:
         print(_render_compact_status(response, event_limit=max(args.events, 0)))
+    return 0 if response.get("ok") else 1
+
+
+def _session_command(args: argparse.Namespace, config: Config) -> int:
+    if args.session_command == "status":
+        info = session_status_info(config)
+        if args.json:
+            print(json.dumps(info, indent=2, sort_keys=True))
+        else:
+            print(render_session_status(info))
+        return 0
+    if args.session_command == "new":
+        return asyncio.run(_session_new(args, config))
+    raise ValueError(f"unsupported session command: {args.session_command}")
+
+
+async def _session_new(args: argparse.Namespace, config: Config) -> int:
+    await ensure_daemon(config, no_start=args.no_start)
+    response = await send_request(config, _payload(args, "session-new", force=args.force))
+    if args.json:
+        print(json.dumps(response, indent=2, sort_keys=True))
+    elif response.get("ok"):
+        state = dict(response.get("state") or {})
+        print("cxv session refreshed")
+        print(f"thread: {state.get('thread_id') or '-'}")
+        print(f"session: {state.get('session_id') or '-'}")
+        print(f"cwd: {state.get('cwd') or '.'}")
+    else:
+        print(f"cxv: {response.get('error', 'session refresh failed')}", file=sys.stderr)
+        configured = response.get("configured_thread_id")
+        source = response.get("configured_source")
+        if configured and source:
+            print(f"configured {source}: {configured}", file=sys.stderr)
+            print(f"unset it with: cxv config unset {source}", file=sys.stderr)
     return 0 if response.get("ok") else 1
 
 

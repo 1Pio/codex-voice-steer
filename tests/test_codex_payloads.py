@@ -28,6 +28,8 @@ class FakeBridge(CodexAppServer):
         self.requests.append((method, params))
         if method == "turn/steer" and self.fail_steer:
             raise JsonRpcError("not steerable")
+        if method == "thread/start":
+            return {"thread": {"id": "thread_new", "sessionId": "session_new", "cwd": params.get("cwd", "")}}
         return {"turn": {"id": params.get("expectedTurnId", "turn_2")}}
 
 
@@ -378,6 +380,23 @@ def test_deliver_text_uses_invocation_config_overrides(tmp_path) -> None:
     assert method == "turn/start"
     assert params["cwd"] == str(tmp_path.resolve())
     assert params["model"] == "gpt-test"
+
+
+def test_start_new_thread_persists_fresh_session_and_clears_volatile_state(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    store.update(thread_id="thread_old", session_id="session_old", active_turn_id="turn_active", queued_inputs=["old"])
+    bridge = FakeBridge(cfg, state_store=store)
+
+    state = bridge.start_new_thread(cfg)
+    method, params = bridge.requests[-1]
+
+    assert method == "thread/start"
+    assert params["sessionStartSource"] == "startup"
+    assert state.thread_id == "thread_new"
+    assert state.session_id == "session_new"
+    assert state.active_turn_id == ""
+    assert state.queued_inputs == []
 
 
 def test_interrupt_sends_active_turn_id(tmp_path) -> None:

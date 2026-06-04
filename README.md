@@ -97,6 +97,25 @@ The foreground UI is designed to show the useful parts of a voice turn without f
 
 By default, user-facing labels such as `user:`, `codex msd:`, and `codex:` are bold. Operational labels such as `sent:` and `turn completed:` stay plain.
 
+## Session Management
+
+CXV saves the Codex thread/session returned by `codex app-server` and resumes it for future voice and text turns.
+
+```bash
+cxv session status
+cxv session new
+cxv session new --force
+```
+
+`cxv session status` shows the saved thread, saved session id, effective resume target, relevant Codex config, and the current delivery behavior. `cxv session new` starts a fresh Codex thread immediately and saves it for future turns. If a turn is active, it refuses by default; pass `--force` to interrupt the active turn and replace the saved session.
+
+If `codex.thread_id` or `codex.resume_thread_id` is set in config, CXV refuses `session new` because that pinned config would override the saved session. Unset the pinned key first:
+
+```bash
+cxv config unset codex.thread_id
+cxv config unset codex.resume_thread_id
+```
+
 Useful UI settings:
 
 ```toml

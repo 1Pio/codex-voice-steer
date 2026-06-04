@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .agents import agent_developer_instructions
 from .config import Config
+from .session import configured_resume_thread_id
 from .state import CxvState, StateStore
 
 
@@ -229,7 +230,7 @@ class CodexAppServer:
     def ensure_thread(self, config: Config | None = None) -> str:
         config = config or self.config
         state = self.state_store.load()
-        configured = str(config.get("codex.thread_id", "") or config.get("codex.resume_thread_id", ""))
+        configured, _source = configured_resume_thread_id(config)
         thread_id = configured or state.thread_id
         if thread_id:
             try:
@@ -246,6 +247,21 @@ class CodexAppServer:
         thread_id = str(thread.get("id", ""))
         self.state_store.update(thread_id=thread_id, session_id=str(thread.get("sessionId", "")), cwd=str(thread.get("cwd", config.get("codex.cwd", "."))))
         return thread_id
+
+    def start_new_thread(self, config: Config | None = None) -> CxvState:
+        config = config or self.config
+        result = self.request("thread/start", self._thread_start_params(config))
+        thread = result.get("thread", {})
+        thread_id = str(thread.get("id", ""))
+        state = self.state_store.update(
+            thread_id=thread_id,
+            session_id=str(thread.get("sessionId", "")),
+            cwd=str(thread.get("cwd", config.get("codex.cwd", "."))),
+            active_turn_id="",
+            queued_inputs=[],
+        )
+        self.state_store.append_event("session_started", thread_id=thread_id, session_id=state.session_id, cwd=state.cwd)
+        return state
 
     def deliver_text(self, text: str, force_steer: bool = False, config: Config | None = None) -> DeliveryResult:
         config = config or self.config

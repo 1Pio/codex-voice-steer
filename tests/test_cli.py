@@ -326,6 +326,26 @@ def test_status_flags_parse() -> None:
     assert args.events == 2
 
 
+def test_session_status_flags_parse() -> None:
+    args = build_parser().parse_args(["session", "status", "--json"])
+    assert args.command == "session"
+    assert args.session_command == "status"
+    assert args.json is True
+
+
+def test_session_new_flags_parse() -> None:
+    args = build_parser().parse_args(["--cwd", "/tmp/cxv", "session", "new", "--force", "--json"])
+    assert args.command == "session"
+    assert args.session_command == "new"
+    assert args.force is True
+    assert args.json is True
+    assert _payload(args, "session-new", force=args.force) == {
+        "command": "session-new",
+        "force": True,
+        "overrides": {"codex": {"cwd": "/tmp/cxv"}},
+    }
+
+
 def test_compact_status_does_not_dump_full_event_history() -> None:
     output = _render_compact_status(
         {
