@@ -96,6 +96,7 @@ The foreground UI is designed to show the useful parts of a voice turn without f
 ```
 
 By default, user-facing labels such as `user:`, `codex msd:`, and `codex:` are bold. Operational labels such as `sent:` and `turn completed:` stay plain.
+`timestamp_opacity` controls the leading timestamps. `secondary_status_opacity` controls the whole foreground status line after the timestamp for every non-primary line, such as `sent: turn/start`, `codex action: ...`, and `turn completed: ...`.
 
 ## Session Management
 
@@ -121,6 +122,7 @@ Useful UI settings:
 ```toml
 [ui]
 timestamp_opacity = 0.45
+secondary_status_opacity = 0.7
 bold_labels = true
 show_codex_tool_traces = true
 show_codex_msd_traces = true
@@ -135,7 +137,7 @@ hidden_events = []
 `visible_events` is an allow-list when non-empty. `hidden_events` suppresses specific events. The same surface can be adjusted per invocation:
 
 ```bash
-cxv --timestamp-opacity 0.45 --show-events wake_detected,user_final,sent,codex_msd_started,codex_final_answer,auto_compact_started,auto_compact_completed,turn_completed
+cxv --timestamp-opacity 0.45 --secondary-status-opacity 0.7 --show-events wake_detected,user_final,sent,codex_msd_started,codex_final_answer,auto_compact_started,auto_compact_completed,turn_completed
 cxv --plain-labels
 ```
 

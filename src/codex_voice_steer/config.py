@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "interactive",
         "show_timestamps": True,
         "timestamp_opacity": 0.45,
+        "secondary_status_opacity": 0.7,
         "bold_labels": True,
         "visible_events": [
             "wake_detected",

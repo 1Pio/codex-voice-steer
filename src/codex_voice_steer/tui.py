@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -15,9 +16,12 @@ from .wake import wake_readiness
 
 
 BOLD_LABELS = {"user:", "codex:", "codex msd:"}
+PRIMARY_STATUS_LABELS = ("user:", "codex msd:", "codex:")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def event_line(message: str, timestamps: bool = True, timestamp_opacity: float = 1.0) -> str:
+def event_line(message: str, timestamps: bool = True, timestamp_opacity: float = 1.0, secondary_status_opacity: float = 1.0) -> str:
+    message = _status_message(message, secondary_status_opacity)
     if not timestamps:
         return message
     timestamp = time.strftime("%H:%M:%S")
@@ -258,7 +262,14 @@ def write_ui(config: Config, event: str, message: str, **fields: object) -> None
     if mode == "jsonl":
         emit_jsonl(event, message=message, **fields)
         return
-    print(event_line(message, bool(config.get("ui.show_timestamps", True)), float(config.get("ui.timestamp_opacity", 1.0))))
+    print(
+        event_line(
+            message,
+            bool(config.get("ui.show_timestamps", True)),
+            float(config.get("ui.timestamp_opacity", 1.0)),
+            float(config.get("ui.secondary_status_opacity", 1.0)),
+        )
+    )
 
 
 def emit_jsonl(event: str, **fields: object) -> None:
@@ -323,11 +334,26 @@ def _line_limit(config: Config | None, key: str, default: int) -> int:
 
 
 def _timestamp_label(timestamp: str, opacity: float) -> str:
+    return _opacity_text(timestamp, opacity)
+
+
+def _status_message(message: str, opacity: float) -> str:
+    if not _is_secondary_status(message):
+        return message
+    return _opacity_text(message, opacity)
+
+
+def _is_secondary_status(message: str) -> bool:
+    plain = ANSI_RE.sub("", message).lstrip()
+    return not plain.startswith(PRIMARY_STATUS_LABELS)
+
+
+def _opacity_text(text: str, opacity: float) -> str:
     opacity = max(0.0, min(1.0, opacity))
     if opacity >= 0.999:
-        return timestamp
+        return text
     gray = int(round(255 * opacity))
-    return f"\x1b[38;2;{gray};{gray};{gray}m{timestamp}\x1b[0m"
+    return f"\x1b[38;2;{gray};{gray};{gray}m{text}\x1b[0m"
 
 
 def _codex_msd_text(event: dict[str, Any]) -> str:

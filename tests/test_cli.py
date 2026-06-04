@@ -299,6 +299,8 @@ def test_interactive_status_display_flags_parse_as_overrides() -> None:
             [
                 "--timestamp-opacity",
                 "0.45",
+                "--secondary-status-opacity",
+                "0.7",
                 "--plain-labels",
                 "--show-events",
                 "wake_detected,sent,codex_msd_started",
@@ -312,6 +314,7 @@ def test_interactive_status_display_flags_parse_as_overrides() -> None:
     assert payload["overrides"] == {
         "ui": {
             "timestamp_opacity": 0.45,
+            "secondary_status_opacity": 0.7,
             "bold_labels": False,
             "visible_events": ["wake_detected", "sent", "codex_msd_started"],
             "hidden_events": ["turn_started"],

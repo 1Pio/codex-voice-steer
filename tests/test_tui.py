@@ -132,6 +132,22 @@ def test_event_line_can_dim_timestamp_with_opacity() -> None:
     assert "\x1b[0m  wake detected" in line
 
 
+def test_event_line_can_dim_secondary_status_after_timestamp() -> None:
+    line = tui.event_line("sent: turn/start", timestamp_opacity=0.45, secondary_status_opacity=0.7)
+    assert line.startswith("\x1b[38;2;115;115;115m")
+    assert "\x1b[0m  \x1b[38;2;178;178;178msent: turn/start\x1b[0m" in line
+
+
+def test_event_line_keeps_primary_status_at_normal_opacity() -> None:
+    assert tui.event_line("user: hello", timestamps=False, secondary_status_opacity=0.7) == "user: hello"
+    assert tui.event_line("\x1b[1mcodex msd:\x1b[0m --text hello", timestamps=False, secondary_status_opacity=0.7) == "\x1b[1mcodex msd:\x1b[0m --text hello"
+    assert tui.event_line("\x1b[1mcodex:\x1b[0m done", timestamps=False, secondary_status_opacity=0.7) == "\x1b[1mcodex:\x1b[0m done"
+
+
+def test_event_line_dims_secondary_status_without_timestamps() -> None:
+    assert tui.event_line("sent: turn/start", timestamps=False, secondary_status_opacity=0.7) == "\x1b[38;2;178;178;178msent: turn/start\x1b[0m"
+
+
 def test_tui_can_disable_bold_labels(tmp_path) -> None:
     cfg = load_config(overrides={"ui": {"bold_labels": False}}, path=tmp_path / "missing.toml")
     assert render_event({"event": "user_final", "text": "plain"}, cfg) == "user: plain"

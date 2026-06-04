@@ -16,6 +16,7 @@ def test_default_config_has_no_version_key() -> None:
     assert parsed["codex"]["permission_profile"] == ":workspace"
     assert "permissions" not in parsed["codex"]
     assert parsed["ui"]["timestamp_opacity"] == 0.45
+    assert parsed["ui"]["secondary_status_opacity"] == 0.7
     assert parsed["ui"]["bold_labels"] is True
     assert parsed["ui"]["visible_events"] == [
         "wake_detected",
