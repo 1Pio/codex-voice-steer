@@ -1,38 +1,103 @@
 # codex-voice-steer
 
-`codex-voice-steer` provides the `cxv` command: a local, manually launched voice-to-Codex bridge.
+`codex-voice-steer` provides `cxv`, a local voice bridge for steering Codex from a microphone, wake word, typed text, or test audio.
 
-V1 scope is intentionally local and user-owned:
+It is built for a simple premise: keep the bridge local, inspectable, and user-owned. `cxv` listens, turns finalized speech into Codex input, shows a compact foreground status stream, and leaves the actual Codex work to Codex.
 
-- `cxv` starts the foreground mini TUI/listener.
-- `cxv serve` is the daemon process. There is no separate daemon binary.
-- `cxv text` and `cxv ttt` send typed input through the same Codex delivery route as finalized speech.
-- Wake word is `scarlett` by default.
-- STT defaults to finalized MacParakeet segments, not fake streaming.
-- No launchd, cron, autostart service, containers, VMs, Codex patches, built-in TTS, Hermes mode, or Hermes routing.
+## What It Is
 
-The current implementation includes the CLI, config, daemon lifecycle, foreground listener, typed Codex route, app-server client, doctor, model catalog, bundled Codex agent templates, OpenWakeWord Scarlett model, Silero VAD, and MacParakeet finalized STT.
+- A manually launched local CLI for voice-to-Codex sessions.
+- A foreground interactive UI plus a small background daemon, both controlled by `cxv`.
+- A wake-word, VAD, and STT pipeline using OpenWakeWord, Silero VAD, and MacParakeet by default.
+- A typed route with `cxv text` and `cxv ttt` that uses the same delivery path as finalized speech.
+- A project that is intentionally compatible with [`msd`](https://github.com/1Pio/mlx-speechd) for spoken Codex responses.
 
-Controlled audio receipts should use file or explicit loopback input, not speaker playback into the microphone:
+What it is not: an autostart service, launchd setup, container, VM, built-in TTS daemon, Hermes router, Codex patch, or hosted voice product.
+
+## Current Shape
+
+`cxv` has three everyday surfaces:
 
 ```bash
-cxv audio devices
-cxv config set audio.device "Loopback Input"
-cxv wake test-audio /path/to/scarlett.wav
-cxv voice test-audio /path/to/full-turn.wav
-cxv voice test-audio /path/to/full-turn.wav --send
+cxv                  # start the foreground listener/TUI
+cxv text "status?"   # send typed input through the voice route
+cxv --no-start status
 ```
 
-Codex response latency is mostly model/turn execution time after speech has already been sent. To make that tradeoff explicit for voice use, use the fast service tier or lower reasoning effort per invocation:
+The daemon is just `cxv serve` running in the background. Use `cxv up` and `cxv down` when you want to manage it explicitly.
+
+```bash
+cxv up
+cxv status
+cxv down
+```
+
+For low-latency voice turns, the biggest practical lever is usually the Codex turn settings, not the audio pipeline:
 
 ```bash
 cxv --fast --effort minimal
-cxv --fast --effort low text check status
+cxv --fast --effort low text "check the current repo status"
 ```
 
-`cxv` shows lightweight Codex action events by default. MSD speech commands are shown separately as `codex msd:` with only the `msd say` arguments displayed, so spoken-response text stays visible without the shell wrapper.
+## Setup
 
-Useful foreground UI controls in `~/.config/codex-voice-steer/config.toml`:
+Start by cloning the repo and checking that the project runs from the checkout:
+
+```bash
+git clone https://github.com/1Pio/codex-voice-steer.git
+cd codex-voice-steer
+uv run --extra audio --extra wake cxv --help
+```
+
+For regular use, install the `cxv` command from the checkout so it is available on `PATH`:
+
+```bash
+uv tool install --editable ".[audio,wake]"
+cxv --help
+```
+
+If `cxv` is not found after installation, let `uv` update your shell path and open a new terminal:
+
+```bash
+uv tool update-shell
+```
+
+Then create the default config:
+
+```bash
+cxv config init
+cxv config edit
+```
+
+Optional, but recommended for spoken Codex responses: install [`msd`](https://github.com/1Pio/mlx-speechd) from its own repository and confirm that `msd say` works before enabling the MSD-aware `cxv` agent.
+
+Then check local readiness:
+
+```bash
+cxv doctor
+cxv audio devices
+cxv wake test-audio /path/to/scarlett.wav
+```
+
+`cxv doctor` treats MSD as optional unless you explicitly configure it as required.
+
+## Foreground UI
+
+The foreground UI is designed to show the useful parts of a voice turn without flooding the terminal:
+
+```text
+15:37:33  wake detected
+15:38:10  user: Scarlet?
+15:38:10  sent: turn/start
+15:38:16  codex action: command: /bin/zsh -lc "sed -n '1,220p' README.md"
+15:38:19  codex msd: --text 'I will look at the screen now.' --instruct 'brief, warm, fast'
+15:38:30  codex: Done.
+15:38:30  turn completed: 019e...
+```
+
+By default, user-facing labels such as `user:`, `codex msd:`, and `codex:` are bold. Operational labels such as `sent:` and `turn completed:` stay plain.
+
+Useful UI settings:
 
 ```toml
 [ui]
@@ -48,9 +113,58 @@ visible_events = ["wake_detected", "stt_final", "user_final", "sent", "codex_too
 hidden_events = []
 ```
 
-Set `visible_events` to a non-empty list for an allow-list, or use `hidden_events` to suppress specific state events. Common event names include `wake_detected`, `stt_final`, `user_final`, `sent`, `turn_started`, `turn_completed`, `voice_turn`, `codex_tool_started`, `codex_msd_started`, `codex_tool_progress`, `codex_visible_delta`, and `codex_final_answer`. By default only user-facing labels such as `user:`, `codex msd:`, and `codex:` are bold; status labels such as `sent:` and `turn completed:` remain plain. Equivalent per-invocation controls are available with `--timestamp-opacity`, `--plain-labels`, `--show-events`, and `--hide-events`.
+`visible_events` is an allow-list when non-empty. `hidden_events` suppresses specific events. The same surface can be adjusted per invocation:
 
-Wake sample collection for retraining/evaluation uses real microphone takes and keeps LiveKit out of runtime source:
+```bash
+cxv --timestamp-opacity 0.45 --show-events wake_detected,user_final,sent,codex_msd_started,codex_final_answer,turn_completed
+cxv --plain-labels
+```
+
+## MSD Compatibility 🎧
+
+[`msd`](https://github.com/1Pio/mlx-speechd) is a recommended companion for `cxv`, especially if you want Codex to speak acknowledgements, important status updates, and final results. MSD is a local MLX speech daemon for fast text-to-speech on macOS: it can speak short messages with `msd say`, render audio files with `msd render`, keep a warm local model available, and let Codex use voice without turning `cxv` itself into a TTS server. That matters when you want a voice-first workflow where important Codex output is heard immediately, not only printed in a terminal.
+
+It is not required by default. `cxv` should work as a voice-to-text-to-Codex bridge without MSD installed, and upstream defaults keep it optional:
+
+```toml
+[instructions.msd]
+enabled = false
+require_msd_on_path = false
+```
+
+When you do want spoken Codex responses, first install and configure [`msd`](https://github.com/1Pio/mlx-speechd) from its own repository, confirm that `msd say` works in your shell, then opt `cxv` into the MSD-aware Codex agent:
+
+```bash
+cxv agents install msd
+cxv config set codex.agent cxv-voice-msd
+cxv config set instructions.msd.enabled true
+```
+
+Only set `instructions.msd.require_msd_on_path = true` when you intentionally want `cxv doctor` to fail if `msd` is missing.
+
+When Codex uses `msd say`, the interactive UI renders that action as `codex msd:` and shows only the arguments after the exact `msd say` command. This keeps spoken-response text readable while hiding shell wrappers such as `/bin/zsh -lc`.
+
+## Controlled Audio Tests
+
+For repeatable checks, use files or explicit loopback input. Speaker playback into the microphone is not a reliable receipt.
+
+```bash
+cxv audio devices
+cxv config set audio.device "Loopback Input"
+cxv wake test-audio /path/to/scarlett.wav
+cxv voice test-audio /path/to/full-turn.wav
+cxv voice test-audio /path/to/full-turn.wav --send
+```
+
+`cxv voice test-audio --send` runs the full route and sends the finalized transcript to Codex.
+
+## Optional Wake Word Model Work
+
+Normal `cxv` usage does not require collecting wake samples, generating synthetic negatives, or training a new wake model. The shipped Scarlett model is already bundled for the default wake word. This section is only for users who want to inspect, evaluate, or train their own compatible OpenWakeWord model, similar to how the bundled Scarlett model was produced.
+
+### Real Wake Samples
+
+Wake sample collection uses real microphone takes and keeps runtime source separate from training/evaluation tooling:
 
 ```bash
 cxv wake samples init ./scarlett-samples
@@ -61,9 +175,11 @@ cxv wake samples list ./scarlett-samples
 cxv wake samples score ./scarlett-samples --model models/wake/scarlett.onnx --threshold 0.5
 ```
 
-Useful hard negatives: `starlet`, `Charlotte`, `star lit`, `let`, `start it`, `scale it`, normal speech. Useful environmental negatives: keyboard, fan, room noise, silence, and handling noise. Use `--keep-weak` for intentional silence or very quiet noise takes.
+Good hard negatives include `starlet`, `Charlotte`, `star lit`, `let`, `start it`, ordinary speech, and natural near misses. Good noise samples include keyboard, fan, room noise, silence, and handling noise. Use `--keep-weak` for intentional silence or very quiet noise takes.
 
-Synthetic negative augmentation stays separate from real microphone samples and is optional. It uses `msd render` when `msd` is installed, normalizes each result to 16 kHz mono PCM16 WAV, and writes metadata that `cxv wake samples list` can read:
+### Synthetic Negatives
+
+Synthetic negative augmentation is optional and stays separate from real microphone samples. It uses `msd render` when MSD is installed, normalizes output to 16 kHz mono PCM16 WAV, and writes metadata that `cxv wake samples list` can read.
 
 ```bash
 cxv wake samples synthetic-msd "$HOME/Documents/cxv-wake-samples/scarlett-synthetic-negatives-v1" \
@@ -76,10 +192,31 @@ cxv wake samples synthetic-msd "$HOME/Documents/cxv-wake-samples/scarlett-synthe
   --count 500
 ```
 
-Synthetic negatives reject exact `scarlett` and `scarlet` prompt tokens. To evaluate a manual dataset without modifying it, use:
+Synthetic prompts reject exact `scarlett` and `scarlet` tokens. The goal is to add realistic non-wake pressure, not to silently mix generated wake-word clips into the real dataset.
 
-```bash
-cxv wake samples score "$HOME/Documents/cxv-wake-samples/scarlett-real-v1" --model models/wake/scarlett.onnx --threshold 0.5 --no-receipt
+### Models And Training
+
+Runtime remains OpenWakeWord-based. LiveKit tooling is used only for external training/evaluation support, not as a runtime dependency.
+
+The bundled Scarlett model lives at:
+
+```text
+models/wake/scarlett.onnx
+src/codex_voice_steer/resources/wake/scarlett.onnx
 ```
 
-`cxv wake samples score` uses configured `wake.model_path` unless `--model` is passed. The bundled Scarlett model is the best high-recall candidate from the current local training run, not a perfect model. Fresh deterministic reset-safe scoring at `wake.sensitivity = 0.5` on `/Users/main/Documents/cxv-wake-samples/scarlett-real-v1` hits `216/219` manual positives, with `10/82` manual negative false hits and `0/60` manual noise false hits. The 500-sample synthetic negative set scores `0/500` false hits. The remaining misses and hard-negative collisions are documented in `models/wake/README.md`.
+See `models/wake/README.md` and `docs/wakeword-livekit-training.md` for model receipts, training notes, and current limitations.
+
+## Useful Commands
+
+```bash
+cxv --help
+cxv config show
+cxv agents list
+cxv agents install slim
+cxv agents install msd
+cxv models
+cxv doctor
+```
+
+Use `cxv down` to stop the daemon cleanly. Use `cxv --no-start status` when you only want to inspect state without starting anything.

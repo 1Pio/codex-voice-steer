@@ -136,8 +136,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "inject",
         "developer_instructions": DEFAULT_DEVELOPER_INSTRUCTIONS,
         "msd": {
-            "enabled": True,
-            "require_msd_on_path": True,
+            "enabled": False,
+            "require_msd_on_path": False,
             "spoken_acknowledgements": "brief",
             "spoken_status_updates": "important",
             "spoken_final_results": True,

@@ -34,8 +34,8 @@ def test_default_config_has_no_version_key() -> None:
     assert parsed["ui"]["show_status_line"] is False
     assert parsed["codex"]["personality"] == "friendly"
     assert parsed["codex"]["fast"] is True
-    assert parsed["instructions"]["msd"]["enabled"] is True
-    assert parsed["instructions"]["msd"]["require_msd_on_path"] is True
+    assert parsed["instructions"]["msd"]["enabled"] is False
+    assert parsed["instructions"]["msd"]["require_msd_on_path"] is False
     assert parsed["instructions"]["msd"]["developer_instructions"] == DEFAULT_MSD_INSTRUCTIONS
 
 
