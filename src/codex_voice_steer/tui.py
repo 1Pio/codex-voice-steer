@@ -13,6 +13,9 @@ from .vad import vad_readiness
 from .wake import wake_readiness
 
 
+BOLD_LABELS = {"user:", "codex:", "codex msd:"}
+
+
 def event_line(message: str, timestamps: bool = True, timestamp_opacity: float = 1.0) -> str:
     if not timestamps:
         return message
@@ -175,7 +178,7 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
     if name == "codex_msd_started":
         if config is not None and not config.get("ui.show_codex_msd_traces", True):
             return ""
-        text = _limit_lines(str(event.get("summary", "")).strip(), _line_limit(config, "ui.max_codex_msd_lines", 20))
+        text = _limit_lines(_codex_msd_text(event), _line_limit(config, "ui.max_codex_msd_lines", 20))
         return _labeled(config, "codex msd:", text)
     if name == "codex_tool_progress":
         if config is not None and not config.get("ui.show_codex_tool_traces", True):
@@ -270,6 +273,8 @@ def _label(config: Config | None, label: str) -> str:
         return label
     if str(config.get("ui.mode", "interactive")) == "jsonl":
         return label
+    if label not in BOLD_LABELS:
+        return label
     if not config.get("ui.bold_labels", True):
         return label
     return f"\x1b[1m{label}\x1b[0m"
@@ -300,3 +305,15 @@ def _timestamp_label(timestamp: str, opacity: float) -> str:
         return timestamp
     gray = int(round(255 * opacity))
     return f"\x1b[38;2;{gray};{gray};{gray}m{timestamp}\x1b[0m"
+
+
+def _codex_msd_text(event: dict[str, Any]) -> str:
+    msd_args = str(event.get("msd_args", "")).strip()
+    if msd_args:
+        return msd_args
+    summary = str(event.get("summary", "")).strip()
+    marker = "msd say"
+    index = summary.find(marker)
+    if index < 0:
+        return summary
+    return summary[index + len(marker) :].strip().strip("'\"")

@@ -191,6 +191,30 @@ def test_item_started_records_msd_command_separately(tmp_path) -> None:
     events = store.load().events or []
     assert events[-1]["event"] == "codex_msd_started"
     assert events[-1]["summary"] == f"command: {command}"
+    assert events[-1]["msd_args"] == "--text 'I will look at the screen now.'"
+
+
+def test_item_started_extracts_shell_wrapped_msd_say_args(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/started",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "item": {
+                "id": "item_1",
+                "type": "commandExecution",
+                "command": "/bin/zsh -lc \"msd say --text 'Yes, I can hear you.' --instruct 'brief, warm, fast'\"",
+            },
+        },
+    )
+
+    events = store.load().events or []
+    assert events[-1]["event"] == "codex_msd_started"
+    assert events[-1]["msd_args"] == "--text 'Yes, I can hear you.' --instruct 'brief, warm, fast'"
 
 
 def test_item_completed_records_final_answer(tmp_path) -> None:

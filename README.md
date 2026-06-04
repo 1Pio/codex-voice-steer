@@ -30,7 +30,7 @@ cxv --fast --effort minimal
 cxv --fast --effort low text check status
 ```
 
-`cxv` shows assistant text deltas and lightweight Codex action/progress events by default. MSD terminal commands are shown separately as `codex msd:` so spoken-response commands stay visible even when ordinary tool traces are hidden.
+`cxv` shows lightweight Codex action events by default. MSD speech commands are shown separately as `codex msd:` with only the `msd say` arguments displayed, so spoken-response text stays visible without the shell wrapper.
 
 Useful foreground UI controls in `~/.config/codex-voice-steer/config.toml`:
 
@@ -42,13 +42,13 @@ show_codex_tool_traces = true
 show_codex_msd_traces = true
 show_codex_final_answers = true
 max_codex_action_lines = 1
-max_codex_msd_lines = 20
+max_codex_msd_lines = 40
 max_codex_answer_lines = 200
-visible_events = []
+visible_events = ["wake_detected", "stt_final", "user_final", "sent", "codex_tool_started", "codex_msd_started", "codex_final_answer", "turn_completed", "voice_error"]
 hidden_events = []
 ```
 
-Set `visible_events` to a non-empty list for an allow-list, or use `hidden_events` to suppress specific state events. Common event names include `wake_detected`, `stt_final`, `user_final`, `sent`, `turn_started`, `turn_completed`, `voice_turn`, `codex_tool_started`, `codex_msd_started`, `codex_tool_progress`, `codex_visible_delta`, and `codex_final_answer`. Equivalent per-invocation controls are available with `--timestamp-opacity`, `--plain-labels`, `--show-events`, and `--hide-events`.
+Set `visible_events` to a non-empty list for an allow-list, or use `hidden_events` to suppress specific state events. Common event names include `wake_detected`, `stt_final`, `user_final`, `sent`, `turn_started`, `turn_completed`, `voice_turn`, `codex_tool_started`, `codex_msd_started`, `codex_tool_progress`, `codex_visible_delta`, and `codex_final_answer`. By default only user-facing labels such as `user:`, `codex msd:`, and `codex:` are bold; status labels such as `sent:` and `turn completed:` remain plain. Equivalent per-invocation controls are available with `--timestamp-opacity`, `--plain-labels`, `--show-events`, and `--hide-events`.
 
 Wake sample collection for retraining/evaluation uses real microphone takes and keeps LiveKit out of runtime source:
 

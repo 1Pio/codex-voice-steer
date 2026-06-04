@@ -148,6 +148,7 @@ class CodexAppServer:
                     item_id=str(item.get("id", "")),
                     item_type=str(item.get("type", "")),
                     summary=summary,
+                    msd_args=_msd_say_args(_command_text(item.get("command", ""))) if msd_command else "",
                 )
         elif method == "item/completed":
             item = dict(params.get("item") or {})
@@ -396,8 +397,44 @@ def _command_invokes_msd(command: str) -> bool:
         executable = Path(parts[0]).name
         if executable == "msd":
             return True
-        if executable in {"sh", "bash", "zsh"} and "-c" in parts:
-            index = parts.index("-c")
-            if index + 1 < len(parts):
-                return _command_invokes_msd(parts[index + 1])
+        if executable in {"sh", "bash", "zsh"}:
+            shell_command = _shell_command_arg(parts)
+            if shell_command:
+                return _command_invokes_msd(shell_command)
     return re.search(r"(^|[\s;&|('\"])(?:[\w./-]+/)?msd(?:\s|$)", command) is not None
+
+
+def _msd_say_args(command: str) -> str:
+    command = command.strip()
+    if not command:
+        return ""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return _msd_say_args_fallback(command)
+    if not parts:
+        return ""
+    executable = Path(parts[0]).name
+    if executable == "msd" and len(parts) >= 2 and parts[1] == "say":
+        return shlex.join(parts[2:])
+    if executable in {"sh", "bash", "zsh"}:
+        shell_command = _shell_command_arg(parts)
+        if shell_command:
+            return _msd_say_args(shell_command)
+    return _msd_say_args_fallback(command)
+
+
+def _msd_say_args_fallback(command: str) -> str:
+    match = re.search(r"(^|[\s;&|('\"])(?:[\w./-]+/)?msd\s+say(?P<args>\s+.*|$)", command)
+    if not match:
+        return ""
+    return match.group("args").strip().strip("'\"")
+
+
+def _shell_command_arg(parts: list[str]) -> str:
+    for index, part in enumerate(parts[1:], start=1):
+        if part == "-c" or (part.startswith("-") and "c" in part[1:]):
+            if index + 1 < len(parts):
+                return parts[index + 1]
+            return ""
+    return ""

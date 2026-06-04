@@ -4,7 +4,7 @@ import tomllib
 
 import pytest
 
-from codex_voice_steer.config import DEFAULT_CONFIG, default_config_toml, load_config, set_config_value, unknown_config_keys, unset_config_value
+from codex_voice_steer.config import DEFAULT_CONFIG, DEFAULT_MSD_INSTRUCTIONS, default_config_toml, load_config, set_config_value, unknown_config_keys, unset_config_value
 
 
 def test_default_config_has_no_version_key() -> None:
@@ -15,11 +15,28 @@ def test_default_config_has_no_version_key() -> None:
     assert parsed["stt"]["engine"] == "macparakeet"
     assert parsed["codex"]["permission_profile"] == ":workspace"
     assert "permissions" not in parsed["codex"]
-    assert parsed["ui"]["timestamp_opacity"] == 1.0
+    assert parsed["ui"]["timestamp_opacity"] == 0.45
     assert parsed["ui"]["bold_labels"] is True
-    assert parsed["ui"]["visible_events"] == []
+    assert parsed["ui"]["visible_events"] == [
+        "wake_detected",
+        "stt_final",
+        "user_final",
+        "sent",
+        "codex_tool_started",
+        "codex_msd_started",
+        "codex_final_answer",
+        "turn_completed",
+        "voice_error",
+    ]
     assert parsed["ui"]["hidden_events"] == []
     assert parsed["ui"]["max_codex_msd_lines"] > parsed["ui"]["max_codex_action_lines"]
+    assert parsed["ui"]["show_codex_visible_messages"] is False
+    assert parsed["ui"]["show_status_line"] is False
+    assert parsed["codex"]["personality"] == "friendly"
+    assert parsed["codex"]["fast"] is True
+    assert parsed["instructions"]["msd"]["enabled"] is True
+    assert parsed["instructions"]["msd"]["require_msd_on_path"] is True
+    assert parsed["instructions"]["msd"]["developer_instructions"] == DEFAULT_MSD_INSTRUCTIONS
 
 
 def test_user_config_overrides_defaults(tmp_path) -> None:

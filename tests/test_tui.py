@@ -46,8 +46,8 @@ def test_tui_honors_visibility_toggles(tmp_path) -> None:
 
 def test_tui_renders_codex_tool_progress_by_default(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
-    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == "\x1b[1mcodex action:\x1b[0m command: git status"
-    assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == "\x1b[1mcodex progress:\x1b[0m Downloading"
+    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == "codex action: command: git status"
+    assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == ""
 
 
 def test_tui_can_hide_codex_tool_traces(tmp_path) -> None:
@@ -58,8 +58,16 @@ def test_tui_can_hide_codex_tool_traces(tmp_path) -> None:
 def test_tui_renders_codex_msd_separately_from_tool_traces(tmp_path) -> None:
     cfg = load_config(overrides={"ui": {"show_codex_tool_traces": False}}, path=tmp_path / "missing.toml")
     assert (
-        render_event({"event": "codex_msd_started", "summary": "command: /bin/zsh -lc 'msd say --text hello'"}, cfg)
-        == "\x1b[1mcodex msd:\x1b[0m command: /bin/zsh -lc 'msd say --text hello'"
+        render_event({"event": "codex_msd_started", "summary": "command: /bin/zsh -lc 'msd say --text hello'", "msd_args": "--text hello"}, cfg)
+        == "\x1b[1mcodex msd:\x1b[0m --text hello"
+    )
+
+
+def test_tui_extracts_msd_say_args_from_legacy_summary(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    assert (
+        render_event({"event": "codex_msd_started", "summary": "command: /bin/zsh -lc \"msd say --text 'Yes.' --instruct fast\""}, cfg)
+        == "\x1b[1mcodex msd:\x1b[0m --text 'Yes.' --instruct fast"
     )
 
 
@@ -78,11 +86,11 @@ def test_tui_filters_visible_and_hidden_events(tmp_path) -> None:
         [
             {"event": "wake_detected"},
             {"event": "sent", "action": "turn/start"},
-            {"event": "codex_msd_started", "summary": "command: msd say hello"},
+            {"event": "codex_msd_started", "summary": "command: msd say hello", "msd_args": "hello"},
         ],
         cfg,
     )
-    assert [line for _event, line in rendered] == ["\x1b[1mcodex msd:\x1b[0m command: msd say hello"]
+    assert [line for _event, line in rendered] == ["\x1b[1mcodex msd:\x1b[0m hello"]
 
 
 def test_event_line_can_dim_timestamp_with_opacity() -> None:

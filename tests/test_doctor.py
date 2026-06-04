@@ -22,8 +22,11 @@ def test_doctor_blocks_when_msd_is_required_but_missing(monkeypatch, tmp_path) -
     assert "required by config" in msd.detail
 
 
-def test_doctor_keeps_msd_optional_by_default(monkeypatch, tmp_path) -> None:
-    cfg = load_config(path=tmp_path / "missing.toml")
+def test_doctor_keeps_msd_optional_when_configured(monkeypatch, tmp_path) -> None:
+    cfg = load_config(
+        overrides={"instructions": {"msd": {"enabled": False, "require_msd_on_path": False}}},
+        path=tmp_path / "missing.toml",
+    )
     _stub_runtime_checks(monkeypatch)
     monkeypatch.setattr(doctor.shutil, "which", lambda command: None if command == "msd" else f"/bin/{command}")
 
