@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from .config import Config
@@ -12,10 +13,16 @@ from .vad import vad_readiness
 from .wake import wake_readiness
 
 
-def event_line(message: str, timestamps: bool = True) -> str:
+def event_line(message: str, timestamps: bool = True, timestamp_opacity: float = 1.0) -> str:
     if not timestamps:
         return message
-    return f"{time.strftime('%H:%M:%S')}  {message}"
+    timestamp = time.strftime("%H:%M:%S")
+    return f"{_timestamp_label(timestamp, timestamp_opacity)}  {message}"
+
+
+@dataclass
+class DisplayState:
+    shown_user_texts: set[str] = field(default_factory=set)
 
 
 def run_foreground_tui(
@@ -78,6 +85,7 @@ async def _run_foreground_listener(
             write_ui(config, "blocked", f"blocked: {blocker}", blocker=blocker)
         return 1
     write_ui(config, "listening", "listening")
+    display_state = DisplayState()
     polls = 0
     try:
         while True:
@@ -88,7 +96,7 @@ async def _run_foreground_listener(
                 return 1
             events = list(status.get("state", {}).get("events", []))
             new_events = _events_after(events, last_seen_ts)
-            for event, rendered in render_events(new_events, config):
+            for event, rendered in render_events(new_events, config, display_state=display_state):
                 write_ui(config, str(event.get("event", "event")), rendered, source_event=event)
             if new_events:
                 last_seen_ts = _last_event_ts(new_events)
@@ -120,6 +128,8 @@ def _event_ts(event: dict[str, Any]) -> float:
 
 def render_event(event: dict[str, Any], config: Config | None = None) -> str:
     name = str(event.get("event", ""))
+    if not _event_visible(name, config):
+        return ""
     if name == "wake_detected":
         if config is not None and not config.get("ui.show_wake_events", True):
             return ""
@@ -131,39 +141,55 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
     if name == "stt_final":
         if config is not None and not config.get("ui.show_final_transcripts", True):
             return ""
-        return "user: " + str(event.get("transcript", "")).strip()
+        return _labeled(config, "user:", _limit_lines(str(event.get("transcript", "")).strip(), _line_limit(config, "ui.max_transcript_lines", 200)))
     if name == "user_final":
         if config is not None and not config.get("ui.show_final_transcripts", True):
             return ""
-        return "user: " + str(event.get("text", "")).strip()
+        return _labeled(config, "user:", _limit_lines(str(event.get("text", "")).strip(), _line_limit(config, "ui.max_transcript_lines", 200)))
     if name == "sent":
-        return f"sent: {event.get('action', '')}"
+        return _labeled(config, "sent:", str(event.get("action", "")))
     if name == "turn_started":
-        return f"turn started: {event.get('turn_id', '')}"
+        return _labeled(config, "turn started:", str(event.get("turn_id", "")))
     if name == "turn_completed":
-        return f"turn completed: {event.get('turn_id', '')}"
+        return _labeled(config, "turn completed:", str(event.get("turn_id", "")))
     if name == "voice_turn":
-        return f"voice turn: {event.get('status', '')}"
+        return _labeled(config, "voice turn:", str(event.get("status", "")))
     if name == "voice_test_audio":
-        return f"voice test: {event.get('status', '')}"
+        return _labeled(config, "voice test:", str(event.get("status", "")))
     if name == "voice_error":
-        return f"voice error: {event.get('error', '')}"
+        return _labeled(config, "voice error:", str(event.get("error", "")))
     if name == "codex_visible_delta":
         if config is not None and not config.get("ui.show_codex_visible_messages", True):
             return ""
-        return "codex: " + str(event.get("delta", "")).strip()
+        return _labeled(config, "codex:", str(event.get("delta", "")).strip())
+    if name == "codex_final_answer":
+        if config is not None and not config.get("ui.show_codex_final_answers", True):
+            return ""
+        text = _limit_lines(str(event.get("text", "")).strip(), _line_limit(config, "ui.max_codex_answer_lines", 200))
+        return _labeled(config, "codex:", text)
     if name == "codex_tool_started":
         if config is not None and not config.get("ui.show_codex_tool_traces", True):
             return ""
-        return "codex action: " + str(event.get("summary", "")).strip()
+        text = _limit_lines(str(event.get("summary", "")).strip(), _line_limit(config, "ui.max_codex_action_lines", 1))
+        return _labeled(config, "codex action:", text)
+    if name == "codex_msd_started":
+        if config is not None and not config.get("ui.show_codex_msd_traces", True):
+            return ""
+        text = _limit_lines(str(event.get("summary", "")).strip(), _line_limit(config, "ui.max_codex_msd_lines", 20))
+        return _labeled(config, "codex msd:", text)
     if name == "codex_tool_progress":
         if config is not None and not config.get("ui.show_codex_tool_traces", True):
             return ""
-        return "codex progress: " + str(event.get("message", "")).strip()
+        return _labeled(config, "codex progress:", str(event.get("message", "")).strip())
     return ""
 
 
-def render_events(events: list[dict[str, Any]], config: Config | None = None) -> list[tuple[dict[str, Any], str]]:
+def render_events(
+    events: list[dict[str, Any]],
+    config: Config | None = None,
+    display_state: DisplayState | None = None,
+) -> list[tuple[dict[str, Any], str]]:
+    display_state = display_state or DisplayState()
     user_final_texts = {
         _normalized_event_text(event.get("text", ""))
         for event in events
@@ -171,16 +197,32 @@ def render_events(events: list[dict[str, Any]], config: Config | None = None) ->
     }
     rendered_events: list[tuple[dict[str, Any], str]] = []
     for event in events:
-        if str(event.get("event", "")) == "stt_final" and _normalized_event_text(event.get("transcript", "")) in user_final_texts:
+        name = str(event.get("event", ""))
+        user_text = _user_event_text(event)
+        normalized_user_text = _normalized_event_text(user_text)
+        if name == "stt_final" and normalized_user_text in user_final_texts:
+            continue
+        if user_text and normalized_user_text in display_state.shown_user_texts:
             continue
         rendered = render_event(event, config)
         if rendered:
             rendered_events.append((event, rendered))
+            if user_text:
+                display_state.shown_user_texts.add(normalized_user_text)
     return rendered_events
 
 
 def _normalized_event_text(value: object) -> str:
     return " ".join(str(value).strip().split())
+
+
+def _user_event_text(event: dict[str, Any]) -> str:
+    name = str(event.get("event", ""))
+    if name == "stt_final":
+        return str(event.get("transcript", ""))
+    if name == "user_final":
+        return str(event.get("text", ""))
+    return ""
 
 
 def write_ui(config: Config, event: str, message: str, **fields: object) -> None:
@@ -190,7 +232,7 @@ def write_ui(config: Config, event: str, message: str, **fields: object) -> None
     if mode == "jsonl":
         emit_jsonl(event, message=message, **fields)
         return
-    print(event_line(message, bool(config.get("ui.show_timestamps", True))))
+    print(event_line(message, bool(config.get("ui.show_timestamps", True)), float(config.get("ui.timestamp_opacity", 1.0))))
 
 
 def emit_jsonl(event: str, **fields: object) -> None:
@@ -198,3 +240,63 @@ def emit_jsonl(event: str, **fields: object) -> None:
 
     sys.stdout.write(json.dumps({"event": event, **fields}) + "\n")
     sys.stdout.flush()
+
+
+def _event_visible(name: str, config: Config | None) -> bool:
+    if config is None:
+        return True
+    visible = _string_list(config.get("ui.visible_events", []))
+    hidden = set(_string_list(config.get("ui.hidden_events", [])))
+    if name in hidden:
+        return False
+    return not visible or name in visible
+
+
+def _string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
+
+
+def _labeled(config: Config | None, label: str, text: str) -> str:
+    rendered_label = _label(config, label)
+    return rendered_label if not text else f"{rendered_label} {text}"
+
+
+def _label(config: Config | None, label: str) -> str:
+    if config is None:
+        return label
+    if str(config.get("ui.mode", "interactive")) == "jsonl":
+        return label
+    if not config.get("ui.bold_labels", True):
+        return label
+    return f"\x1b[1m{label}\x1b[0m"
+
+
+def _limit_lines(text: str, max_lines: int) -> str:
+    if max_lines < 1:
+        return ""
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    remaining = len(lines) - max_lines
+    return "\n".join([*lines[:max_lines], f"... truncated {remaining} line(s)"])
+
+
+def _line_limit(config: Config | None, key: str, default: int) -> int:
+    if config is None:
+        return default
+    try:
+        return int(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _timestamp_label(timestamp: str, opacity: float) -> str:
+    opacity = max(0.0, min(1.0, opacity))
+    if opacity >= 0.999:
+        return timestamp
+    gray = int(round(255 * opacity))
+    return f"\x1b[38;2;{gray};{gray};{gray}m{timestamp}\x1b[0m"

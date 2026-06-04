@@ -5,7 +5,7 @@ import types
 
 from codex_voice_steer.config import load_config
 from codex_voice_steer import tui
-from codex_voice_steer.tui import _events_after, _last_event_ts, render_event, render_events, write_ui
+from codex_voice_steer.tui import DisplayState, _events_after, _last_event_ts, render_event, render_events, write_ui
 
 
 def test_tui_renders_voice_events() -> None:
@@ -27,6 +27,15 @@ def test_tui_suppresses_duplicate_stt_final_when_user_final_is_present() -> None
     assert [line for _event, line in rendered] == ["user: Scarlet.", "sent: turn/start"]
 
 
+def test_tui_suppresses_duplicate_user_text_across_poll_batches() -> None:
+    state = DisplayState()
+    first = render_events([{"event": "stt_final", "transcript": " Scarlet. "}], display_state=state)
+    second = render_events([{"event": "user_final", "text": "Scarlet."}], display_state=state)
+
+    assert [line for _event, line in first] == ["user: Scarlet."]
+    assert second == []
+
+
 def test_tui_honors_visibility_toggles(tmp_path) -> None:
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text("[ui]\nshow_wake_events = false\nshow_final_transcripts = false\n")
@@ -37,13 +46,54 @@ def test_tui_honors_visibility_toggles(tmp_path) -> None:
 
 def test_tui_renders_codex_tool_progress_by_default(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
-    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == "codex action: command: git status"
-    assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == "codex progress: Downloading"
+    assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == "\x1b[1mcodex action:\x1b[0m command: git status"
+    assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == "\x1b[1mcodex progress:\x1b[0m Downloading"
 
 
 def test_tui_can_hide_codex_tool_traces(tmp_path) -> None:
     cfg = load_config(overrides={"ui": {"show_codex_tool_traces": False}}, path=tmp_path / "missing.toml")
     assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == ""
+
+
+def test_tui_renders_codex_msd_separately_from_tool_traces(tmp_path) -> None:
+    cfg = load_config(overrides={"ui": {"show_codex_tool_traces": False}}, path=tmp_path / "missing.toml")
+    assert (
+        render_event({"event": "codex_msd_started", "summary": "command: /bin/zsh -lc 'msd say --text hello'"}, cfg)
+        == "\x1b[1mcodex msd:\x1b[0m command: /bin/zsh -lc 'msd say --text hello'"
+    )
+
+
+def test_tui_renders_codex_final_answer_with_answer_limit(tmp_path) -> None:
+    cfg = load_config(overrides={"ui": {"max_codex_answer_lines": 2}}, path=tmp_path / "missing.toml")
+    rendered = render_event({"event": "codex_final_answer", "text": "one\ntwo\nthree"}, cfg)
+    assert rendered == "\x1b[1mcodex:\x1b[0m one\ntwo\n... truncated 1 line(s)"
+
+
+def test_tui_filters_visible_and_hidden_events(tmp_path) -> None:
+    cfg = load_config(
+        overrides={"ui": {"visible_events": ["wake_detected", "codex_msd_started"], "hidden_events": ["wake_detected"]}},
+        path=tmp_path / "missing.toml",
+    )
+    rendered = render_events(
+        [
+            {"event": "wake_detected"},
+            {"event": "sent", "action": "turn/start"},
+            {"event": "codex_msd_started", "summary": "command: msd say hello"},
+        ],
+        cfg,
+    )
+    assert [line for _event, line in rendered] == ["\x1b[1mcodex msd:\x1b[0m command: msd say hello"]
+
+
+def test_event_line_can_dim_timestamp_with_opacity() -> None:
+    line = tui.event_line("wake detected", timestamp_opacity=0.45)
+    assert line.startswith("\x1b[38;2;115;115;115m")
+    assert "\x1b[0m  wake detected" in line
+
+
+def test_tui_can_disable_bold_labels(tmp_path) -> None:
+    cfg = load_config(overrides={"ui": {"bold_labels": False}}, path=tmp_path / "missing.toml")
+    assert render_event({"event": "user_final", "text": "plain"}, cfg) == "user: plain"
 
 
 def test_tui_jsonl_and_quiet_modes(capsys, tmp_path) -> None:

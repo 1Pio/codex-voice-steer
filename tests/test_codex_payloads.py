@@ -173,6 +173,63 @@ def test_item_started_records_codex_tool_action(tmp_path) -> None:
     assert events[-1]["summary"] == "command: git status --short"
 
 
+def test_item_started_records_msd_command_separately(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    command = "/bin/zsh -lc 'msd say --text \"I will look at the screen now.\"'"
+    bridge._handle_notification(
+        "item/started",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "item": {"id": "item_1", "type": "commandExecution", "command": command},
+        },
+    )
+
+    events = store.load().events or []
+    assert events[-1]["event"] == "codex_msd_started"
+    assert events[-1]["summary"] == f"command: {command}"
+
+
+def test_item_completed_records_final_answer(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/completed",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "item": {"id": "item_1", "type": "agentMessage", "text": "Done.", "phase": "final_answer"},
+        },
+    )
+    bridge._handle_notification("turn/completed", {"threadId": "thread_1", "turnId": "turn_1"})
+
+    events = store.load().events or []
+    assert [event["event"] for event in events[-2:]] == ["codex_final_answer", "turn_completed"]
+    assert events[-2]["text"] == "Done."
+
+
+def test_item_completed_ignores_commentary_agent_message(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "item/completed",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "item": {"id": "item_1", "type": "agentMessage", "text": "Working.", "phase": "commentary"},
+        },
+    )
+
+    assert store.load().events in (None, [])
+
+
 def test_mcp_progress_records_codex_tool_progress(tmp_path) -> None:
     cfg = load_config(path=tmp_path / "missing.toml")
     store = StateStore(tmp_path / "state.json")

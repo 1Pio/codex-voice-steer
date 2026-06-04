@@ -293,6 +293,32 @@ def test_ui_mode_flags_parse_as_overrides() -> None:
     assert quiet["overrides"] == {"ui": {"mode": "quiet", "show_partial_transcripts": True}}
 
 
+def test_interactive_status_display_flags_parse_as_overrides() -> None:
+    payload = _payload(
+        build_parser().parse_args(
+            [
+                "--timestamp-opacity",
+                "0.45",
+                "--plain-labels",
+                "--show-events",
+                "wake_detected,sent,codex_msd_started",
+                "--hide-events",
+                "turn_started",
+                "listen",
+            ]
+        ),
+        "listen",
+    )
+    assert payload["overrides"] == {
+        "ui": {
+            "timestamp_opacity": 0.45,
+            "bold_labels": False,
+            "visible_events": ["wake_detected", "sent", "codex_msd_started"],
+            "hidden_events": ["turn_started"],
+        }
+    }
+
+
 def test_status_flags_parse() -> None:
     args = build_parser().parse_args(["status", "--json", "--events", "2"])
     assert args.command == "status"

@@ -15,6 +15,11 @@ def test_default_config_has_no_version_key() -> None:
     assert parsed["stt"]["engine"] == "macparakeet"
     assert parsed["codex"]["permission_profile"] == ":workspace"
     assert "permissions" not in parsed["codex"]
+    assert parsed["ui"]["timestamp_opacity"] == 1.0
+    assert parsed["ui"]["bold_labels"] is True
+    assert parsed["ui"]["visible_events"] == []
+    assert parsed["ui"]["hidden_events"] == []
+    assert parsed["ui"]["max_codex_msd_lines"] > parsed["ui"]["max_codex_action_lines"]
 
 
 def test_user_config_overrides_defaults(tmp_path) -> None:

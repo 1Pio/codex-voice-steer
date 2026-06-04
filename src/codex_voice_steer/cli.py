@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jsonl", action="store_true", help="Emit foreground cxv events as JSON Lines.")
     parser.add_argument("--quiet", action="store_true", help="Suppress foreground cxv status/event output.")
     parser.add_argument("--show-partials", action="store_true", help="Show partial transcript events when available.")
+    parser.add_argument("--timestamp-opacity", type=float, help="Dim foreground TUI timestamps with an ANSI opacity approximation from 0.0 to 1.0.")
+    parser.add_argument("--plain-labels", action="store_true", help="Disable bold labels such as user:, codex:, and codex msd: in the foreground TUI.")
+    parser.add_argument("--show-events", help="Comma-separated foreground event names to show; when set, other event-history lines are hidden.")
+    parser.add_argument("--hide-events", help="Comma-separated foreground event names to hide.")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("up", help="Start the background cxv daemon.")
@@ -721,6 +725,14 @@ def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
         ui["mode"] = "quiet"
     if getattr(args, "show_partials", False):
         ui["show_partial_transcripts"] = True
+    if getattr(args, "timestamp_opacity", None) is not None:
+        ui["timestamp_opacity"] = float(args.timestamp_opacity)
+    if getattr(args, "plain_labels", False):
+        ui["bold_labels"] = False
+    if getattr(args, "show_events", None):
+        ui["visible_events"] = split_csv_values(str(args.show_events))
+    if getattr(args, "hide_events", None):
+        ui["hidden_events"] = split_csv_values(str(args.hide_events))
     if codex:
         overrides["codex"] = codex
     if ui:

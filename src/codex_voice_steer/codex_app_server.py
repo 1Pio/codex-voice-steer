@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -136,16 +138,29 @@ class CodexAppServer:
             )
         elif method == "item/started":
             item = dict(params.get("item") or {})
-            summary = self._tool_item_summary(item)
+            msd_command = self._tool_item_is_msd_command(item)
+            summary = self._tool_item_summary(item, clip=not msd_command)
             if summary:
                 self.state_store.append_event(
-                    "codex_tool_started",
+                    "codex_msd_started" if msd_command else "codex_tool_started",
                     thread_id=self._id_param(params, "threadId", "thread"),
                     turn_id=self._id_param(params, "turnId", "turn"),
                     item_id=str(item.get("id", "")),
                     item_type=str(item.get("type", "")),
                     summary=summary,
                 )
+        elif method == "item/completed":
+            item = dict(params.get("item") or {})
+            if str(item.get("type", "")) == "agentMessage" and str(item.get("phase", "")) == "final_answer":
+                text = str(item.get("text", "")).strip()
+                if text:
+                    self.state_store.append_event(
+                        "codex_final_answer",
+                        thread_id=self._id_param(params, "threadId", "thread"),
+                        turn_id=self._id_param(params, "turnId", "turn"),
+                        item_id=str(item.get("id", "")),
+                        text=text,
+                    )
         elif method == "item/mcpToolCall/progress":
             self.state_store.append_event(
                 "codex_tool_progress",
@@ -180,11 +195,14 @@ class CodexAppServer:
         return ""
 
     @staticmethod
-    def _tool_item_summary(item: dict[str, Any]) -> str:
+    def _tool_item_summary(item: dict[str, Any], clip: bool = True) -> str:
         item_type = str(item.get("type", ""))
         if item_type == "commandExecution":
-            command = " ".join(str(item.get("command", "")).split())
-            return _clip(f"command: {command}") if command else "command"
+            command = _command_text(item.get("command", ""))
+            if not command:
+                return "command"
+            summary = f"command: {command}"
+            return _clip(summary) if clip else summary
         if item_type == "mcpToolCall":
             server = str(item.get("server", "")).strip()
             tool = str(item.get("tool", "")).strip()
@@ -200,6 +218,12 @@ class CodexAppServer:
             count = len(changes) if isinstance(changes, list) else 0
             return f"file change: {count} update(s)" if count else "file change"
         return ""
+
+    @staticmethod
+    def _tool_item_is_msd_command(item: dict[str, Any]) -> bool:
+        if str(item.get("type", "")) != "commandExecution":
+            return False
+        return _command_invokes_msd(_command_text(item.get("command", "")))
 
     def ensure_thread(self, config: Config | None = None) -> str:
         config = config or self.config
@@ -352,3 +376,28 @@ def _clip(value: str, limit: int = 120) -> str:
     if len(clean) <= limit:
         return clean
     return clean[: limit - 1] + "..."
+
+
+def _command_text(value: object) -> str:
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value)
+    return " ".join(str(value).split())
+
+
+def _command_invokes_msd(command: str) -> bool:
+    command = command.strip()
+    if not command:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = []
+    if parts:
+        executable = Path(parts[0]).name
+        if executable == "msd":
+            return True
+        if executable in {"sh", "bash", "zsh"} and "-c" in parts:
+            index = parts.index("-c")
+            if index + 1 < len(parts):
+                return _command_invokes_msd(parts[index + 1])
+    return re.search(r"(^|[\s;&|('\"])(?:[\w./-]+/)?msd(?:\s|$)", command) is not None
