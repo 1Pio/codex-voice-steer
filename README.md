@@ -128,14 +128,14 @@ show_codex_final_answers = true
 max_codex_action_lines = 1
 max_codex_msd_lines = 40
 max_codex_answer_lines = 200
-visible_events = ["wake_detected", "stt_final", "user_final", "sent", "codex_tool_started", "codex_msd_started", "codex_final_answer", "turn_completed", "voice_error"]
+visible_events = ["wake_detected", "stt_final", "user_final", "sent", "codex_tool_started", "codex_msd_started", "codex_final_answer", "auto_compact_started", "auto_compact_completed", "auto_compact_failed", "turn_completed", "voice_error"]
 hidden_events = []
 ```
 
 `visible_events` is an allow-list when non-empty. `hidden_events` suppresses specific events. The same surface can be adjusted per invocation:
 
 ```bash
-cxv --timestamp-opacity 0.45 --show-events wake_detected,user_final,sent,codex_msd_started,codex_final_answer,turn_completed
+cxv --timestamp-opacity 0.45 --show-events wake_detected,user_final,sent,codex_msd_started,codex_final_answer,auto_compact_started,auto_compact_completed,turn_completed
 cxv --plain-labels
 ```
 

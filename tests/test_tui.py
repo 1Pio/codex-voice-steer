@@ -50,6 +50,39 @@ def test_tui_renders_codex_tool_progress_by_default(tmp_path) -> None:
     assert render_event({"event": "codex_tool_progress", "message": "Downloading"}, cfg) == ""
 
 
+def test_tui_renders_auto_compaction_status_by_default(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+
+    assert (
+        render_event({"event": "auto_compact_started", "usage_ratio": 0.57}, cfg)
+        == "automatically compacting context (57.0%)"
+    )
+    assert render_event({"event": "auto_compact_completed"}, cfg) == "compacted context"
+
+
+def test_tui_can_show_and_hide_auto_compaction_status_events(tmp_path) -> None:
+    cfg = load_config(
+        overrides={
+            "ui": {
+                "visible_events": ["auto_compact_started", "auto_compact_completed"],
+                "hidden_events": ["auto_compact_completed"],
+            }
+        },
+        path=tmp_path / "missing.toml",
+    )
+
+    rendered = render_events(
+        [
+            {"event": "auto_compact_started"},
+            {"event": "auto_compact_completed"},
+            {"event": "wake_detected"},
+        ],
+        cfg,
+    )
+
+    assert [line for _event, line in rendered] == ["automatically compacting context"]
+
+
 def test_tui_can_hide_codex_tool_traces(tmp_path) -> None:
     cfg = load_config(overrides={"ui": {"show_codex_tool_traces": False}}, path=tmp_path / "missing.toml")
     assert render_event({"event": "codex_tool_started", "summary": "command: git status"}, cfg) == ""

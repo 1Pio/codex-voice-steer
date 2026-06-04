@@ -200,9 +200,9 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
     if name == "auto_compact_cancelled":
         return _labeled(config, "auto compact:", f"cancelled: {event.get('source', 'activity')}")
     if name == "auto_compact_started":
-        return _labeled(config, "auto compact:", f"started at {_ratio_label(event)}")
+        return _with_optional_ratio("automatically compacting context", event)
     if name == "auto_compact_completed":
-        return _labeled(config, "auto compact:", "completed")
+        return "compacted context"
     if name == "auto_compact_skipped":
         return _labeled(config, "auto compact:", f"skipped: {event.get('reason', '')}")
     if name == "auto_compact_failed":
@@ -356,3 +356,9 @@ def _ratio_label(event: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         ratio = 0.0
     return f"{ratio * 100:.1f}%"
+
+
+def _with_optional_ratio(message: str, event: dict[str, Any]) -> str:
+    if event.get("usage_ratio") is None:
+        return message
+    return f"{message} ({_ratio_label(event)})"
