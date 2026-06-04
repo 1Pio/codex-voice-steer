@@ -25,6 +25,9 @@ def test_default_config_has_no_version_key() -> None:
         "codex_tool_started",
         "codex_msd_started",
         "codex_final_answer",
+        "auto_compact_started",
+        "auto_compact_completed",
+        "auto_compact_failed",
         "turn_completed",
         "voice_error",
     ]
@@ -37,6 +40,10 @@ def test_default_config_has_no_version_key() -> None:
     assert parsed["instructions"]["msd"]["enabled"] is False
     assert parsed["instructions"]["msd"]["require_msd_on_path"] is False
     assert parsed["instructions"]["msd"]["developer_instructions"] == DEFAULT_MSD_INSTRUCTIONS
+    assert parsed["auto_compact"]["enabled"] is True
+    assert parsed["auto_compact"]["threshold_ratio"] == 0.55
+    assert parsed["auto_compact"]["idle_delay_sec"] == 45.0
+    assert parsed["auto_compact"]["cooldown_sec"] == 300.0
 
 
 def test_user_config_overrides_defaults(tmp_path) -> None:

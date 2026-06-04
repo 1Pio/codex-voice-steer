@@ -319,6 +319,32 @@ def test_interactive_status_display_flags_parse_as_overrides() -> None:
     }
 
 
+def test_auto_compact_flags_parse_as_overrides() -> None:
+    payload = _payload(
+        build_parser().parse_args(
+            [
+                "--no-auto-compact",
+                "--auto-compact-threshold-ratio",
+                "0.7",
+                "--auto-compact-idle-delay-sec",
+                "12",
+                "--auto-compact-cooldown-sec",
+                "60",
+                "listen",
+            ]
+        ),
+        "listen",
+    )
+    assert payload["overrides"] == {
+        "auto_compact": {
+            "enabled": False,
+            "threshold_ratio": 0.7,
+            "idle_delay_sec": 12.0,
+            "cooldown_sec": 60.0,
+        }
+    }
+
+
 def test_status_flags_parse() -> None:
     args = build_parser().parse_args(["status", "--json", "--events", "2"])
     assert args.command == "status"

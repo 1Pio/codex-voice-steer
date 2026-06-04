@@ -312,3 +312,143 @@ def test_idle_monitor_records_timeout_and_sets_stop_event(tmp_path) -> None:
     events = asyncio.run(run())
     assert events[-1]["event"] == "daemon_idle_timeout"
     assert events[-1]["idle_timeout_minutes"] == 1.0
+
+
+def _token_usage_params(total_tokens: int = 560, context_window: int = 1000, thread_id: str = "thread_1", turn_id: str = "turn_1") -> dict:
+    return {
+        "threadId": thread_id,
+        "turnId": turn_id,
+        "tokenUsage": {
+            "total": {
+                "totalTokens": total_tokens,
+                "inputTokens": total_tokens,
+                "cachedInputTokens": 0,
+                "outputTokens": 0,
+                "reasoningOutputTokens": 0,
+            },
+            "last": {
+                "totalTokens": 0,
+                "inputTokens": 0,
+                "cachedInputTokens": 0,
+                "outputTokens": 0,
+                "reasoningOutputTokens": 0,
+            },
+            "modelContextWindow": context_window,
+        },
+    }
+
+
+def test_auto_compact_waits_for_completed_turn_and_threshold(tmp_path) -> None:
+    compacted: list[str] = []
+
+    async def run() -> list[dict]:
+        config = load_config(
+            overrides={"server": {"state_db": str(tmp_path / "state.json")}, "auto_compact": {"idle_delay_sec": 0.001, "cooldown_sec": 0}},
+            path=tmp_path / "missing.toml",
+        )
+        cxv = CxvDaemon(config)
+        cxv.codex = SimpleNamespace(compact_thread=lambda thread_id: compacted.append(thread_id))
+        cxv.state_store.update(thread_id="thread_1", active_turn_id="turn_1")
+
+        cxv._handle_codex_event("thread/tokenUsage/updated", _token_usage_params(total_tokens=560))
+        assert cxv.auto_compact_task is None
+
+        cxv.state_store.update(active_turn_id="")
+        cxv._handle_codex_event("turn/completed", {"threadId": "thread_1", "turn": {"id": "turn_1"}})
+        await asyncio.sleep(0.02)
+        return cxv.state_store.load().events or []
+
+    events = asyncio.run(run())
+    assert compacted == ["thread_1"]
+    assert [event["event"] for event in events[-2:]] == ["auto_compact_scheduled", "auto_compact_started"]
+
+
+def test_auto_compact_ignores_usage_below_threshold(tmp_path) -> None:
+    async def run() -> tuple[object, list[dict]]:
+        config = load_config(
+            overrides={"server": {"state_db": str(tmp_path / "state.json")}, "auto_compact": {"idle_delay_sec": 0.001}},
+            path=tmp_path / "missing.toml",
+        )
+        cxv = CxvDaemon(config)
+        cxv.state_store.update(thread_id="thread_1", active_turn_id="")
+        cxv._handle_codex_event("thread/tokenUsage/updated", _token_usage_params(total_tokens=540))
+        cxv._handle_codex_event("turn/completed", {"threadId": "thread_1", "turn": {"id": "turn_1"}})
+        await asyncio.sleep(0.01)
+        return cxv.auto_compact_task, cxv.state_store.load().events or []
+
+    task, events = asyncio.run(run())
+    assert task is None
+    assert "auto_compact_scheduled" not in [event["event"] for event in events]
+
+
+def test_auto_compact_cancels_when_bound_thread_starts_new_turn(tmp_path) -> None:
+    compacted: list[str] = []
+
+    async def run() -> list[dict]:
+        config = load_config(
+            overrides={"server": {"state_db": str(tmp_path / "state.json")}, "auto_compact": {"idle_delay_sec": 0.05, "cooldown_sec": 0}},
+            path=tmp_path / "missing.toml",
+        )
+        cxv = CxvDaemon(config)
+        cxv.codex = SimpleNamespace(compact_thread=lambda thread_id: compacted.append(thread_id))
+        cxv.state_store.update(thread_id="thread_1", active_turn_id="")
+        cxv._handle_codex_event("turn/completed", {"threadId": "thread_1", "turn": {"id": "turn_1"}})
+        cxv._handle_codex_event("thread/tokenUsage/updated", _token_usage_params(total_tokens=560))
+        cxv._handle_codex_event("turn/started", {"threadId": "thread_1", "turn": {"id": "turn_2"}})
+        await asyncio.sleep(0.08)
+        return cxv.state_store.load().events or []
+
+    events = asyncio.run(run())
+    assert compacted == []
+    assert events[-1]["event"] == "auto_compact_cancelled"
+    assert events[-1]["source"] == "turn_started"
+
+
+def test_auto_compact_rechecks_queued_input_before_compacting(tmp_path) -> None:
+    compacted: list[str] = []
+
+    async def run() -> list[dict]:
+        config = load_config(
+            overrides={"server": {"state_db": str(tmp_path / "state.json")}, "auto_compact": {"idle_delay_sec": 0.001, "cooldown_sec": 0}},
+            path=tmp_path / "missing.toml",
+        )
+        cxv = CxvDaemon(config)
+        cxv.codex = SimpleNamespace(compact_thread=lambda thread_id: compacted.append(thread_id))
+        cxv.state_store.update(thread_id="thread_1", active_turn_id="")
+        cxv._handle_codex_event("turn/completed", {"threadId": "thread_1", "turn": {"id": "turn_1"}})
+        cxv._handle_codex_event("thread/tokenUsage/updated", _token_usage_params(total_tokens=560))
+        cxv.state_store.update(queued_inputs=["next"])
+        await asyncio.sleep(0.02)
+        return cxv.state_store.load().events or []
+
+    events = asyncio.run(run())
+    assert compacted == []
+    assert events[-1]["event"] == "auto_compact_skipped"
+    assert events[-1]["reason"] == "queued_input"
+
+
+def test_auto_compact_honors_cooldown(tmp_path) -> None:
+    config = load_config(
+        overrides={"server": {"state_db": str(tmp_path / "state.json")}, "auto_compact": {"cooldown_sec": 300}},
+        path=tmp_path / "missing.toml",
+    )
+    cxv = CxvDaemon(config)
+    cxv.state_store.update(thread_id="thread_1", active_turn_id="")
+    cxv.last_auto_compact_monotonic["thread_1"] = daemon.time.monotonic()
+    cxv._handle_codex_event("turn/completed", {"threadId": "thread_1", "turn": {"id": "turn_1"}})
+    cxv._handle_codex_event("thread/tokenUsage/updated", _token_usage_params(total_tokens=560))
+
+    events = cxv.state_store.load().events or []
+    assert cxv.auto_compact_task is None
+    assert events[-1]["event"] == "auto_compact_skipped"
+    assert events[-1]["reason"] == "cooldown"
+
+
+def test_auto_compact_runtime_overrides_are_applied(tmp_path) -> None:
+    config = load_config(overrides={"server": {"state_db": str(tmp_path / "state.json")}}, path=tmp_path / "missing.toml")
+    cxv = CxvDaemon(config)
+    cxv._apply_runtime_auto_compact_overrides({"overrides": {"auto_compact": {"enabled": False, "idle_delay_sec": 12}}})
+
+    effective = cxv._auto_compact_config()
+    assert effective.get("auto_compact.enabled") is False
+    assert effective.get("auto_compact.idle_delay_sec") == 12

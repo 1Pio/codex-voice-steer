@@ -171,6 +171,22 @@ class CodexAppServer:
                 item_id=str(params.get("itemId", "")),
                 message=str(params.get("message", "")),
             )
+        elif method == "thread/tokenUsage/updated":
+            usage = self._token_usage(params)
+            self.state_store.append_event(
+                "codex_token_usage",
+                thread_id=self._id_param(params, "threadId", "thread"),
+                turn_id=str(params.get("turnId", "")),
+                total_tokens=usage["total_tokens"],
+                model_context_window=usage["model_context_window"],
+                usage_ratio=usage["usage_ratio"],
+            )
+        elif method == "thread/compacted":
+            self.state_store.append_event(
+                "auto_compact_completed",
+                thread_id=self._id_param(params, "threadId", "thread"),
+                turn_id=str(params.get("turnId", "")),
+            )
         elif method == "turn/completed":
             state = self.state_store.load()
             turn_id = self._id_param(params, "turnId", "turn") or state.active_turn_id
@@ -314,6 +330,13 @@ class CodexAppServer:
         self.state_store.update(active_turn_id="")
         return DeliveryResult(action="turn/interrupt", thread_id=state.thread_id, turn_id=state.active_turn_id)
 
+    def compact_thread(self, thread_id: str) -> dict[str, Any]:
+        if not thread_id:
+            raise ValueError("thread_id is required for compaction")
+        result = self.request("thread/compact/start", {"threadId": thread_id})
+        self.state_store.append_event("sent", action="thread/compact/start", thread_id=thread_id)
+        return result
+
     def _thread_start_params(self, config: Config | None = None) -> dict[str, Any]:
         config = config or self.config
         params: dict[str, Any] = {
@@ -387,12 +410,32 @@ class CodexAppServer:
     def _permission_profile(config: Config) -> str:
         return str(config.get("codex.permission_profile", config.get("codex.permissions", ":workspace")))
 
+    @staticmethod
+    def _token_usage(params: dict[str, Any]) -> dict[str, float | int]:
+        usage = dict(params.get("tokenUsage") or {})
+        total = dict(usage.get("total") or {})
+        total_tokens = _safe_int(total.get("totalTokens"))
+        model_context_window = _safe_int(usage.get("modelContextWindow"))
+        usage_ratio = float(total_tokens / model_context_window) if model_context_window > 0 else 0.0
+        return {
+            "total_tokens": total_tokens,
+            "model_context_window": model_context_window,
+            "usage_ratio": usage_ratio,
+        }
+
 
 def _clip(value: str, limit: int = 120) -> str:
     clean = " ".join(value.split())
     if len(clean) <= limit:
         return clean
     return clean[: limit - 1] + "..."
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _command_text(value: object) -> str:

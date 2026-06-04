@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plain-labels", action="store_true", help="Disable bold labels such as user:, codex:, and codex msd: in the foreground TUI.")
     parser.add_argument("--show-events", help="Comma-separated foreground event names to show; when set, other event-history lines are hidden.")
     parser.add_argument("--hide-events", help="Comma-separated foreground event names to hide.")
+    compact_group = parser.add_mutually_exclusive_group()
+    compact_group.add_argument("--auto-compact", dest="auto_compact_enabled", action="store_true", default=None, help="Enable automatic Codex context compaction for this invocation or daemon runtime.")
+    compact_group.add_argument("--no-auto-compact", dest="auto_compact_enabled", action="store_false", help="Disable automatic Codex context compaction for this invocation or daemon runtime.")
+    parser.add_argument("--auto-compact-threshold-ratio", type=float, help="Compact after a completed turn when context usage is at or above this ratio.")
+    parser.add_argument("--auto-compact-idle-delay-sec", type=float, help="Seconds to wait after turn completion with no new input before compacting.")
+    parser.add_argument("--auto-compact-cooldown-sec", type=float, help="Minimum seconds between automatic compactions for the same thread.")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("up", help="Start the background cxv daemon.")
@@ -307,7 +313,7 @@ def _status(args: argparse.Namespace, config: Config) -> int:
     if not is_running(config):
         print("cxv daemon: stopped")
         return 0
-    response = asyncio.run(send_request(config, {"command": "status"}))
+    response = asyncio.run(send_request(config, _payload(args, "status")))
     if args.json:
         print(json.dumps(response, indent=2, sort_keys=True))
     else:
@@ -379,7 +385,7 @@ def _event_summary(event: dict[str, Any]) -> str:
     event_time = _event_time_label(event)
     if event_time:
         details.append(f"at={event_time}")
-    for key in ("action", "status", "turn_id", "transcript", "reason", "error", "device", "noop"):
+    for key in ("action", "status", "turn_id", "transcript", "reason", "error", "usage_ratio", "threshold_ratio", "device", "noop"):
         value = event.get(key)
         if value is not None and value != "":
             details.append(f"{key}={_clip(str(value))}")
@@ -754,6 +760,7 @@ def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     codex: dict[str, Any] = {}
     ui: dict[str, Any] = {}
+    auto_compact: dict[str, Any] = {}
     if getattr(args, "cwd", None):
         codex["cwd"] = args.cwd
     if getattr(args, "agent", None):
@@ -778,10 +785,20 @@ def _overrides_from_args(args: argparse.Namespace) -> dict[str, Any]:
         ui["visible_events"] = split_csv_values(str(args.show_events))
     if getattr(args, "hide_events", None):
         ui["hidden_events"] = split_csv_values(str(args.hide_events))
+    if getattr(args, "auto_compact_enabled", None) is not None:
+        auto_compact["enabled"] = bool(args.auto_compact_enabled)
+    if getattr(args, "auto_compact_threshold_ratio", None) is not None:
+        auto_compact["threshold_ratio"] = float(args.auto_compact_threshold_ratio)
+    if getattr(args, "auto_compact_idle_delay_sec", None) is not None:
+        auto_compact["idle_delay_sec"] = float(args.auto_compact_idle_delay_sec)
+    if getattr(args, "auto_compact_cooldown_sec", None) is not None:
+        auto_compact["cooldown_sec"] = float(args.auto_compact_cooldown_sec)
     if codex:
         overrides["codex"] = codex
     if ui:
         overrides["ui"] = ui
+    if auto_compact:
+        overrides["auto_compact"] = auto_compact
     return overrides
 
 

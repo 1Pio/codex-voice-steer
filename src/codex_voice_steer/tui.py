@@ -193,6 +193,20 @@ def render_event(event: dict[str, Any], config: Config | None = None) -> str:
         if config is not None and not config.get("ui.show_codex_tool_traces", True):
             return ""
         return _labeled(config, "codex progress:", str(event.get("message", "")).strip())
+    if name == "codex_token_usage":
+        return _labeled(config, "context:", _context_usage_text(event))
+    if name == "auto_compact_scheduled":
+        return _labeled(config, "auto compact:", f"scheduled in {float(event.get('idle_delay_sec', 0.0)):g}s at {_ratio_label(event)}")
+    if name == "auto_compact_cancelled":
+        return _labeled(config, "auto compact:", f"cancelled: {event.get('source', 'activity')}")
+    if name == "auto_compact_started":
+        return _labeled(config, "auto compact:", f"started at {_ratio_label(event)}")
+    if name == "auto_compact_completed":
+        return _labeled(config, "auto compact:", "completed")
+    if name == "auto_compact_skipped":
+        return _labeled(config, "auto compact:", f"skipped: {event.get('reason', '')}")
+    if name == "auto_compact_failed":
+        return _labeled(config, "auto compact:", f"failed: {event.get('error', '')}")
     return ""
 
 
@@ -326,3 +340,19 @@ def _codex_msd_text(event: dict[str, Any]) -> str:
     if index < 0:
         return summary
     return summary[index + len(marker) :].strip().strip("'\"")
+
+
+def _context_usage_text(event: dict[str, Any]) -> str:
+    total = int(event.get("total_tokens", 0) or 0)
+    window = int(event.get("model_context_window", 0) or 0)
+    if window <= 0:
+        return f"{total} tokens"
+    return f"{_ratio_label(event)} ({total}/{window})"
+
+
+def _ratio_label(event: dict[str, Any]) -> str:
+    try:
+        ratio = float(event.get("usage_ratio", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        ratio = 0.0
+    return f"{ratio * 100:.1f}%"

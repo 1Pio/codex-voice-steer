@@ -271,6 +271,42 @@ def test_mcp_progress_records_codex_tool_progress(tmp_path) -> None:
     assert events[-1]["message"] == "Working"
 
 
+def test_token_usage_notification_records_context_ratio(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = CodexAppServer(cfg, state_store=store)
+
+    bridge._handle_notification(
+        "thread/tokenUsage/updated",
+        {
+            "threadId": "thread_1",
+            "turnId": "turn_1",
+            "tokenUsage": {
+                "total": {"totalTokens": 550, "inputTokens": 500, "cachedInputTokens": 0, "outputTokens": 50, "reasoningOutputTokens": 0},
+                "last": {"totalTokens": 50, "inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 50, "reasoningOutputTokens": 0},
+                "modelContextWindow": 1000,
+            },
+        },
+    )
+
+    event = (store.load().events or [])[-1]
+    assert event["event"] == "codex_token_usage"
+    assert event["total_tokens"] == 550
+    assert event["model_context_window"] == 1000
+    assert event["usage_ratio"] == 0.55
+
+
+def test_compact_thread_uses_native_app_server_request(tmp_path) -> None:
+    cfg = load_config(path=tmp_path / "missing.toml")
+    store = StateStore(tmp_path / "state.json")
+    bridge = FakeBridge(cfg, state_store=store)
+
+    bridge.compact_thread("thread_1")
+
+    assert bridge.requests[-1] == ("thread/compact/start", {"threadId": "thread_1"})
+    assert (store.load().events or [])[-1]["action"] == "thread/compact/start"
+
+
 def test_request_waits_on_condition_until_response_arrives(tmp_path) -> None:
     class FakeStdin:
         def __init__(self) -> None:

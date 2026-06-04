@@ -35,6 +35,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "codex_tool_started",
             "codex_msd_started",
             "codex_final_answer",
+            "auto_compact_started",
+            "auto_compact_completed",
+            "auto_compact_failed",
             "turn_completed",
             "voice_error",
         ],
@@ -151,6 +154,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "include_voice_metadata": True,
         "include_wake_word": True,
         "include_stt_diagnostics": False,
+    },
+    "auto_compact": {
+        "enabled": True,
+        "threshold_ratio": 0.55,
+        "idle_delay_sec": 45.0,
+        "cooldown_sec": 300.0,
     },
     "commands": {
         "typed_input_command": "text",
